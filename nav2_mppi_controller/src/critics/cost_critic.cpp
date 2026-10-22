@@ -308,7 +308,11 @@ void CostCritic::score(CriticData & data)
     if (scored) {
       if (track_collisions) {
         for (int i = 0; i < strided_traj_rows; ++i) {
-          collisions[i] = collided[static_cast<size_t>(i)] != 0;
+          // Only set a collision. An earlier critic may already have marked this
+          // trajectory, and a clear from this device result must not undo that.
+          if (collided[static_cast<size_t>(i)] != 0) {
+            collisions[i] = true;
+          }
         }
       }
       applyWeightAndPower(data, repulsive, strided_traj_cols, all_collided);

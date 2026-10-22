@@ -175,8 +175,8 @@ target_link_libraries(mppi_critics PRIVATE
   pluginlib::pluginlib
 )
 if(NAV2_MPPI_CUDA)
-  target_compile_definitions(mppi_critics PUBLIC NAV2_MPPI_HAS_CUDA=1)
-  target_link_libraries(mppi_critics PUBLIC CUDA::cudart)
+  target_compile_definitions(mppi_critics PRIVATE NAV2_MPPI_HAS_CUDA=1)
+  target_link_libraries(mppi_critics PRIVATE CUDA::cudart)
 endif()
 
 add_library(mppi_trajectory_validators SHARED

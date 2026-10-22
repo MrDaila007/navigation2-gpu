@@ -99,6 +99,9 @@ struct ClassicalCase
   std::vector<float> repulsive;
   bool fail{false};
   std::vector<bool> collided;
+  // When non-empty and track_collisions is set, these flags are already in
+  // trajectories_in_collision before score(). Empty means start all false.
+  std::vector<bool> initial_collisions;
 };
 
 // Builds the scenario, runs one critic named critic_name with the given use_cuda value, and
@@ -183,7 +186,12 @@ void score_case(
   {state, trajectories, path, goal, costs, model_dt,
     false, nullptr, nullptr, std::nullopt, std::nullopt, {}};
   if (c.track_collisions) {
-    data.trajectories_in_collision = std::vector<bool>(c.batch, false);
+    if (c.initial_collisions.empty()) {
+      data.trajectories_in_collision = std::vector<bool>(c.batch, false);
+    } else {
+      ASSERT_EQ(static_cast<int>(c.initial_collisions.size()), c.batch);
+      data.trajectories_in_collision = c.initial_collisions;
+    }
   }
 
   critic.score(data);
@@ -431,6 +439,20 @@ ClassicalCase DisabledCritic_case()
   return c;
 }
 
+// Free trajectory already marked by an earlier critic, plus a lethal trajectory.
+// The free flag must stay true. The lethal trajectory must become true.
+ClassicalCase PreseededFreeCollision_case()
+{
+  ClassicalCase c;
+  c.batch = 2;
+  c.time_steps = 1;
+  c.painted = {{9, 9, 0}, {8, 8, 254}};
+  c.samples = {{at_cell(9, 9)}, {at_cell(8, 8)}};
+  c.initial_collisions = {true, false};
+  c.collided = {true, true};
+  return c;
+}
+
 #if NAV2_MPPI_HAS_CUDA
 void expect_cuda_matches_classical(const ClassicalCase & c)
 {
@@ -548,3 +570,36 @@ TEST(CostCriticParity, CudaEmptyCollisionVector) {
 }
 TEST(CostCriticParity, CudaDisabledCritic) {expect_cuda_matches_classical(DisabledCritic_case());}
 #endif
+
+TEST(CostCriticParity, PreseededFreeCollisionStaysTrue)
+{
+  using namespace mppi::critics;  // NOLINT
+  const ClassicalCase c = PreseededFreeCollision_case();
+
+  auto expect_hits = [](const std::vector<bool> & hits, const char * which) {
+    ASSERT_EQ(hits.size(), 2u) << which;
+    EXPECT_TRUE(hits[0]) << which << " free trajectory lost a pre-seeded collision";
+    EXPECT_TRUE(hits[1]) << which << " lethal trajectory was not marked";
+  };
+
+  Eigen::ArrayXf cpu_costs;
+  bool cpu_fail = false;
+  std::vector<bool> cpu_hits;
+  score_case(c, "preseed_cpu", false, cpu_costs, cpu_fail, cpu_hits);
+  expect_hits(cpu_hits, "cpu");
+
+#if NAV2_MPPI_HAS_CUDA
+  const bool device = cost_critic_cuda_device_available();
+  const int before = cost_critic_cuda_launch_count();
+#endif
+  Eigen::ArrayXf cuda_costs;
+  bool cuda_fail = false;
+  std::vector<bool> cuda_hits;
+  score_case(c, "preseed_cuda", true, cuda_costs, cuda_fail, cuda_hits);
+  expect_hits(cuda_hits, "cuda");
+#if NAV2_MPPI_HAS_CUDA
+  if (device) {
+    EXPECT_GT(cost_critic_cuda_launch_count(), before);
+  }
+#endif
+}
