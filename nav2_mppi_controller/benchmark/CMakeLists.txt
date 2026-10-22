@@ -23,3 +23,20 @@ foreach(name IN LISTS BENCHMARK_NAMES)
     ${PROJECT_SOURCE_DIR}/test/utils
   )
 endforeach()
+
+if(NAV2_MPPI_CUDA)
+  add_executable(cost_critic_cuda_benchmark
+    cost_critic_cuda_benchmark.cpp
+  )
+  target_link_libraries(cost_critic_cuda_benchmark
+    benchmark
+    geometry_msgs::geometry_msgs
+    mppi_controller
+    mppi_critics
+    nav2_core::nav2_core
+    nav2_costmap_2d::nav2_costmap_2d_core
+    nav_msgs::nav_msgs
+    CUDA::cudart
+  )
+  target_compile_definitions(cost_critic_cuda_benchmark PRIVATE NAV2_MPPI_HAS_CUDA=1)
+endif()

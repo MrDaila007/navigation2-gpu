@@ -17,6 +17,7 @@
 // repulsive costs of the scenario, never read back from the critic.
 
 #include <cmath>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -796,6 +797,49 @@ TEST(CostCriticParity, CudaResizeUsesNewGrid)
   score_both(0.35f, 0.35f, false, "after resize, stale origin with old resolution");
 }
 #endif
+
+TEST(CostCriticParity, RecordsTransferAndKernelTime)
+{
+#if !NAV2_MPPI_HAS_CUDA
+  GTEST_SKIP();
+#else
+  using namespace mppi::critics;  // NOLINT
+  if (!cost_critic_cuda_device_available()) {
+    GTEST_SKIP();
+  }
+
+  ClassicalCase c;
+  c.consider_footprint = false;
+  c.cost_weight = 254.0f;
+  c.point_step = 2;
+  c.batch = 2000;
+  c.time_steps = 56;
+  c.painted = {{5, 5, 0}};
+  c.samples.assign(
+    c.batch, std::vector<Sample>(c.time_steps, at_cell(5, 5)));
+
+  const int before = cost_critic_cuda_launch_count();
+  Eigen::ArrayXf costs;
+  bool fail = false;
+  std::vector<bool> hits;
+  score_case(c, "timing_cuda", true, costs, fail, hits);
+  if (::testing::Test::HasFatalFailure()) {
+    return;
+  }
+
+  const auto timings = cost_critic_cuda_last_timings();
+  std::cout << "CostCritic CUDA timings ms: costmap_h2d=" << timings.costmap_h2d_ms
+            << " trajectory_h2d=" << timings.trajectory_h2d_ms
+            << " kernel=" << timings.kernel_ms
+            << " d2h=" << timings.d2h_ms << std::endl;
+  EXPECT_GE(timings.costmap_h2d_ms, 0.f);
+  EXPECT_GE(timings.trajectory_h2d_ms, 0.f);
+  EXPECT_GE(timings.kernel_ms, 0.f);
+  EXPECT_GE(timings.d2h_ms, 0.f);
+  EXPECT_GT(cost_critic_cuda_launch_count(), before);
+  EXPECT_GT(cost_critic_cuda_launch_count(), 0);
+#endif
+}
 
 TEST(CostCriticParity, PreseededFreeCollisionStaysTrue)
 {
