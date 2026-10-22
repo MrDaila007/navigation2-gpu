@@ -658,6 +658,130 @@ TEST(CostCriticParity, CudaInscribedCenterFootprintClear) {
 TEST(CostCriticParity, CudaFootprintEarlyExit) {
   expect_cuda_matches_classical(FootprintEarlyExit_case());
 }
+
+TEST(CostCriticParity, CudaResizeUsesNewGrid)
+{
+  using namespace mppi;  // NOLINT
+  using namespace mppi::critics;  // NOLINT
+  if (!cost_critic_cuda_device_available()) {
+    GTEST_SKIP();
+  }
+
+  // One costmap and one CPU and one CUDA critic, all kept alive across both scores
+  auto node = std::make_shared<nav2::LifecycleNode>("resize_node");
+  auto costmap_ros = std::make_shared<nav2_costmap_2d::Costmap2DROS>(
+    "resize_costmap", "", true);
+  std::string handler_name = "parity";
+  ParametersHandler param_handler(node, handler_name);
+  costmap_ros->declare_parameter("track_unknown_space", rclcpp::ParameterValue(false));
+
+  const std::string cpu_name = "resize_cpu";
+  const std::string cuda_name = "resize_cuda";
+  for (const auto & name : {cpu_name, cuda_name}) {
+    auto getParam = param_handler.getParamGetter(name);
+    bool consider_footprint = false;
+    float cost_weight = 254.0f;
+    int point_step = 1;
+    bool use_cuda = false;
+    getParam(consider_footprint, "consider_footprint", false);
+    getParam(cost_weight, "cost_weight", 254.0f);
+    getParam(point_step, "trajectory_point_step", 1);
+    getParam(use_cuda, "use_cuda", name == cuda_name);
+  }
+
+  rclcpp_lifecycle::State lstate;
+  costmap_ros->on_configure(lstate);
+  auto * costmap = costmap_ros->getCostmap();
+
+  auto zero_grid = [costmap]() {
+      for (unsigned int my = 0; my < costmap->getSizeInCellsY(); ++my) {
+        for (unsigned int mx = 0; mx < costmap->getSizeInCellsX(); ++mx) {
+          costmap->setCost(mx, my, 0);
+        }
+      }
+    };
+
+  CostCritic cpu_critic;
+  cpu_critic.on_configure(node, "mppi", cpu_name, costmap_ros, &param_handler);
+  CostCritic cuda_critic;
+  cuda_critic.on_configure(node, "mppi", cuda_name, costmap_ros, &param_handler);
+
+  const float collision_cost = 1000000.0f;
+  const float expected_cost = collision_cost * (254.0f / 254.0f) / 1.0f;
+
+  // Scores one sample through both critics on the current grid and checks parity
+  auto score_both = [&](float x, float y, bool lethal, const char * which) {
+      const float want_cost = lethal ? expected_cost : 0.0f;
+      auto run = [&](CostCritic & critic, Eigen::ArrayXf & costs, bool & fail,
+        std::vector<bool> & hits) {
+        models::State state;
+        state.local_path_length = 10.0f;
+        models::Trajectories trajectories;
+        trajectories.reset(1, 1);
+        trajectories.x(0, 0) = x;
+        trajectories.y(0, 0) = y;
+        models::Path path;
+        geometry_msgs::msg::Pose goal;
+        costs = Eigen::ArrayXf::Zero(1);
+        float model_dt = 0.1f;
+        CriticData data =
+        {state, trajectories, path, goal, costs, model_dt,
+          false, nullptr, nullptr, std::nullopt, std::nullopt, {}};
+        data.trajectories_in_collision = std::vector<bool>(1, false);
+        critic.score(data);
+        fail = data.fail_flag;
+        hits.assign(
+          data.trajectories_in_collision.begin(), data.trajectories_in_collision.end());
+      };
+
+      Eigen::ArrayXf cpu_costs;
+      Eigen::ArrayXf cuda_costs;
+      bool cpu_fail = false;
+      bool cuda_fail = false;
+      std::vector<bool> cpu_hits;
+      std::vector<bool> cuda_hits;
+      const int before = cost_critic_cuda_launch_count();
+      run(cpu_critic, cpu_costs, cpu_fail, cpu_hits);
+      EXPECT_EQ(cost_critic_cuda_launch_count(), before) << which;
+      run(cuda_critic, cuda_costs, cuda_fail, cuda_hits);
+      EXPECT_GT(cost_critic_cuda_launch_count(), before) << which;
+
+      ASSERT_EQ(cpu_costs.size(), 1) << which;
+      ASSERT_EQ(cuda_costs.size(), 1) << which;
+      EXPECT_EQ(cpu_costs(0), want_cost) << which;
+      EXPECT_EQ(cuda_costs(0), want_cost) << which;
+      EXPECT_EQ(cpu_costs(0), cuda_costs(0)) << which;
+      EXPECT_EQ(cpu_fail, lethal) << which;
+      EXPECT_EQ(cuda_fail, lethal) << which;
+      EXPECT_EQ(cpu_hits, std::vector<bool>{lethal}) << which;
+      EXPECT_EQ(cuda_hits, std::vector<bool>{lethal}) << which;
+    };
+
+  // First score: default grid, lethal cell (10, 10)
+  zero_grid();
+  costmap->setCost(10, 10, 254);
+  const unsigned int old_size_x = costmap->getSizeInCellsX();
+  score_both(world_from_cell(10), world_from_cell(10), true, "before resize");
+  if (::testing::Test::HasFatalFailure()) {
+    return;
+  }
+
+  // Second score: smaller grid with a different resolution and origin.
+  // mx = (-0.3 - (-1.0)) / 0.2 = 3.5, which casts to cell 3.
+  costmap->resizeMap(15, 15, 0.2, -1.0, -1.0);
+  ASSERT_EQ(costmap->getSizeInCellsX(), 15u);
+  ASSERT_LT(costmap->getSizeInCellsX(), old_size_x);
+  zero_grid();
+  costmap->setCost(3, 3, 254);
+  score_both(-0.3f, -0.3f, true, "after resize");
+  if (::testing::Test::HasFatalFailure()) {
+    return;
+  }
+  // (-0.3, -0.3) is also off the old map, so the lethal score alone cannot tell stale
+  // geometry from new. A free sample at (1.0, 1.0) is cell (10, 10) on the new grid
+  // and sits inside the old 5 m map, so a stale origin or resolution would misread it.
+  score_both(1.0f, 1.0f, false, "after resize, free cell");
+}
 #endif
 
 TEST(CostCriticParity, PreseededFreeCollisionStaysTrue)
