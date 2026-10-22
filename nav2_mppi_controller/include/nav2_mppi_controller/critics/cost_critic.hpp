@@ -128,6 +128,20 @@ protected:
     return my * size_x_ + mx;
   }
 
+  /**
+   * @brief Scale repulsive costs into the critic output and set the fail flag
+   */
+  void applyWeightAndPower(
+    CriticData & data, const Eigen::ArrayXf & repulsive, int strided_cols, bool all_collided);
+
+  /**
+   * @brief Sum per-pose costs into one repulsive value per trajectory
+   * @param gathered Pose costs laid out like trajectories, or null to read the costmap
+   */
+  void accumulateFromPoseCosts(
+    CriticData & data, const Eigen::ArrayXXf * gathered,
+    Eigen::ArrayXf & repulsive, bool & all_collided);
+
   nav2_costmap_2d::FootprintCollisionChecker<nav2_costmap_2d::Costmap2D *>
   collision_checker_{nullptr};
   float possible_collision_cost_;

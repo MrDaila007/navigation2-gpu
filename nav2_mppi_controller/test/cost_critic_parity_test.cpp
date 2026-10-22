@@ -431,6 +431,42 @@ ClassicalCase DisabledCritic_case()
   return c;
 }
 
+#if NAV2_MPPI_HAS_CUDA
+void expect_cuda_matches_classical(const ClassicalCase & c)
+{
+  using namespace mppi::critics;  // NOLINT
+  if (!cost_critic_cuda_device_available()) {
+    GTEST_SKIP();
+  }
+  ASSERT_TRUE(cost_critic_cuda_compiled());
+  ASSERT_TRUE(cost_critic_cuda_device_available());
+  const int before = cost_critic_cuda_launch_count();
+  const std::string case_name =
+    ::testing::UnitTest::GetInstance()->current_test_info()->name();
+
+  Eigen::ArrayXf cpu_costs;
+  Eigen::ArrayXf cuda_costs;
+  bool cpu_fail = false;
+  bool cuda_fail = false;
+  std::vector<bool> cpu_hits;
+  std::vector<bool> cuda_hits;
+  score_case(c, "classical", false, cpu_costs, cpu_fail, cpu_hits);
+  score_case(c, "cuda_classical", true, cuda_costs, cuda_fail, cuda_hits);
+
+  for (int i = 0; i < cpu_costs.size(); ++i) {
+    EXPECT_EQ(cpu_costs(i), cuda_costs(i)) << case_name << " trajectory " << i;
+  }
+  EXPECT_EQ(cpu_fail, cuda_fail);
+  EXPECT_EQ(cpu_hits, cuda_hits);
+  const bool enabled = c.enabled;
+  if (enabled) {
+    EXPECT_GT(cost_critic_cuda_launch_count(), before);
+  } else {
+    EXPECT_EQ(cost_critic_cuda_launch_count(), before);
+  }
+}
+#endif
+
 }  // namespace
 
 TEST(CostCriticParity, FreeSpace) {expect_classical(FreeSpace_case());}
@@ -459,7 +495,9 @@ TEST(CostCriticParity, CudaFlagOffDoesNotLaunch)
   const int before = cost_critic_cuda_launch_count();
   // Score SumInflated through a critic whose use_cuda parameter is false.
   expect_classical(SumInflated_case());
+#if !NAV2_MPPI_HAS_CUDA
   EXPECT_FALSE(cost_critic_cuda_compiled());
+#endif
   EXPECT_EQ(cost_critic_cuda_launch_count(), before);
 }
 
@@ -487,3 +525,26 @@ TEST(CostCriticParity, CudaFlagOnMatchesCpuWhenDeviceMissing)
   EXPECT_EQ(cpu_hits, cuda_hits);
   EXPECT_EQ(cost_critic_cuda_launch_count(), before);
 }
+
+#if NAV2_MPPI_HAS_CUDA
+TEST(CostCriticParity, CudaFreeSpace) {expect_cuda_matches_classical(FreeSpace_case());}
+TEST(CostCriticParity, CudaSumInflated) {expect_cuda_matches_classical(SumInflated_case());}
+TEST(CostCriticParity, CudaEarlyExitLethal) {expect_cuda_matches_classical(EarlyExitLethal_case());}
+TEST(CostCriticParity, CudaInscribedCollides) {expect_cuda_matches_classical(InscribedCollides_case());}
+TEST(CostCriticParity, CudaCost252AddsItself) {expect_cuda_matches_classical(Cost252AddsItself_case());}
+TEST(CostCriticParity, CudaNearGoalDrop) {expect_cuda_matches_classical(NearGoalDrop_case());}
+TEST(CostCriticParity, CudaNearGoalCritical) {expect_cuda_matches_classical(NearGoalCritical_case());}
+TEST(CostCriticParity, CudaNearGoalLethal) {expect_cuda_matches_classical(NearGoalLethal_case());}
+TEST(CostCriticParity, CudaUnknownTracked) {expect_cuda_matches_classical(UnknownTracked_case());}
+TEST(CostCriticParity, CudaUnknownUntracked) {expect_cuda_matches_classical(UnknownUntracked_case());}
+TEST(CostCriticParity, CudaOutOfMapLow) {expect_cuda_matches_classical(OutOfMapLow_case());}
+TEST(CostCriticParity, CudaOutOfMapHigh) {expect_cuda_matches_classical(OutOfMapHigh_case());}
+TEST(CostCriticParity, CudaStrideSkipsLethal) {expect_cuda_matches_classical(StrideSkipsLethal_case());}
+TEST(CostCriticParity, CudaPowerTwo) {expect_cuda_matches_classical(PowerTwo_case());}
+TEST(CostCriticParity, CudaMixedFailFlag) {expect_cuda_matches_classical(MixedFailFlag_case());}
+TEST(CostCriticParity, CudaAllCollide) {expect_cuda_matches_classical(AllCollide_case());}
+TEST(CostCriticParity, CudaEmptyCollisionVector) {
+  expect_cuda_matches_classical(EmptyCollisionVector_case());
+}
+TEST(CostCriticParity, CudaDisabledCritic) {expect_cuda_matches_classical(DisabledCritic_case());}
+#endif

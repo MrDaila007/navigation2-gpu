@@ -12,9 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Used when CUDA support is not compiled in: no device is ever available.
+// Used when the device kernel is not linked. With NAV2_MPPI_HAS_CUDA the library
+// reports that it was compiled and whether a device exists, but score_center
+// still produces no buffer and does not count a launch.
 
 #include "nav2_mppi_controller/critics/cost_critic_cuda.hpp"
+
+#if NAV2_MPPI_HAS_CUDA
+#include <cuda_runtime_api.h>
+#endif
 
 namespace mppi::critics
 {
@@ -36,9 +42,22 @@ bool CostCriticCuda::gather_center(
   return false;
 }
 
+#if NAV2_MPPI_HAS_CUDA
+bool cost_critic_cuda_compiled() {return true;}
+
+bool cost_critic_cuda_device_available()
+{
+  int count = 0;
+  if (cudaGetDeviceCount(&count) != cudaSuccess) {
+    return false;
+  }
+  return count > 0;
+}
+#else
 bool cost_critic_cuda_compiled() {return false;}
 
 bool cost_critic_cuda_device_available() {return false;}
+#endif
 
 int cost_critic_cuda_launch_count() {return 0;}
 

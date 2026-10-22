@@ -28,7 +28,8 @@ include(CheckCXXCompilerFlag)
 check_cxx_compiler_flag("-mfma" COMPILER_SUPPORTS_FMA)
 
 if(COMPILER_SUPPORTS_FMA)
-  add_compile_options(-mfma)
+  # Keep the host flag off CUDA compilation. nvcc rejects -mfma as its own option.
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-mfma>)
 endif()
 
 # If building one the same hardware to be deployed on, try `-march=native`!
@@ -86,10 +87,49 @@ target_link_libraries(mppi_motion_models PUBLIC
 
 option(NAV2_MPPI_CUDA "Build MPPI CostCritic CUDA scoring" OFF)
 
+# OFF keeps the stub. ON replaces it with the device kernel.
+set(MPPI_COST_CRITIC_CUDA_SRC src/critics/cost_critic_cuda_stub.cpp)
+if(NAV2_MPPI_CUDA)
+  # nav2_package() adds -Werror for every language. nvcc treats the following
+  # -MD as the argument of -Werror, so keep those host flags on C++ only.
+  get_directory_property(_nav2_mppi_compile_options COMPILE_OPTIONS)
+  set(_nav2_mppi_scoped_options)
+  foreach(_opt IN LISTS _nav2_mppi_compile_options)
+    if(_opt MATCHES "COMPILE_LANGUAGE")
+      list(APPEND _nav2_mppi_scoped_options "${_opt}")
+    else()
+      list(APPEND _nav2_mppi_scoped_options "$<$<COMPILE_LANGUAGE:CXX>:${_opt}>")
+    endif()
+  endforeach()
+  set_property(DIRECTORY PROPERTY COMPILE_OPTIONS ${_nav2_mppi_scoped_options})
+
+  if(NOT CMAKE_CUDA_ARCHITECTURES)
+    execute_process(
+      COMMAND nvidia-smi --query-gpu=compute_cap --format=csv,noheader
+      OUTPUT_VARIABLE NAV2_MPPI_GPU_COMPUTE_CAP
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      RESULT_VARIABLE NAV2_MPPI_GPU_COMPUTE_CAP_RESULT
+    )
+    if(NOT NAV2_MPPI_GPU_COMPUTE_CAP_RESULT EQUAL 0 OR NAV2_MPPI_GPU_COMPUTE_CAP STREQUAL "")
+      message(FATAL_ERROR
+        "CMAKE_CUDA_ARCHITECTURES is empty and nvidia-smi --query-gpu=compute_cap failed")
+    endif()
+    string(REGEX REPLACE "[\r\n].*" "" NAV2_MPPI_GPU_COMPUTE_CAP "${NAV2_MPPI_GPU_COMPUTE_CAP}")
+    string(STRIP "${NAV2_MPPI_GPU_COMPUTE_CAP}" NAV2_MPPI_GPU_COMPUTE_CAP)
+    string(REPLACE "." "" NAV2_MPPI_GPU_COMPUTE_CAP "${NAV2_MPPI_GPU_COMPUTE_CAP}")
+    set(CMAKE_CUDA_ARCHITECTURES "${NAV2_MPPI_GPU_COMPUTE_CAP}")
+  endif()
+  message(STATUS "CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}")
+  enable_language(CUDA)
+  find_package(CUDAToolkit REQUIRED)
+  set(CMAKE_CUDA_STANDARD 17)
+  set(MPPI_COST_CRITIC_CUDA_SRC src/critics/cost_critic_cuda.cu)
+endif()
+
 add_library(mppi_critics SHARED
   src/critics/constraint_critic.cpp
   src/critics/cost_critic.cpp
-  src/critics/cost_critic_cuda_stub.cpp
+  ${MPPI_COST_CRITIC_CUDA_SRC}
   src/critics/goal_critic.cpp
   src/critics/goal_angle_critic.cpp
   src/critics/mecanum_critic.cpp
@@ -105,9 +145,11 @@ add_library(mppi_critics SHARED
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     # Apple Clang: use C++20 and optimization, omit -fconcepts
     target_compile_features(mppi_critics PUBLIC cxx_std_20)
-    target_compile_options(mppi_critics PUBLIC -O3)
+    target_compile_options(mppi_critics PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-O3>)
 else()
-    target_compile_options(mppi_critics PUBLIC -fconcepts -O3)
+    target_compile_options(mppi_critics PUBLIC
+      $<$<COMPILE_LANGUAGE:CXX>:-fconcepts>
+      $<$<COMPILE_LANGUAGE:CXX>:-O3>)
 endif()
 target_include_directories(mppi_critics
   PUBLIC
@@ -132,6 +174,10 @@ target_link_libraries(mppi_critics PUBLIC
 target_link_libraries(mppi_critics PRIVATE
   pluginlib::pluginlib
 )
+if(NAV2_MPPI_CUDA)
+  target_compile_definitions(mppi_critics PUBLIC NAV2_MPPI_HAS_CUDA=1)
+  target_link_libraries(mppi_critics PUBLIC CUDA::cudart)
+endif()
 
 add_library(mppi_trajectory_validators SHARED
   src/trajectory_validators/optimal_trajectory_validator.cpp
@@ -181,6 +227,9 @@ if(BUILD_TESTING)
 
   add_subdirectory(test)
   add_subdirectory(benchmark)
+  if(NAV2_MPPI_CUDA)
+    target_compile_definitions(cost_critic_parity_test PRIVATE NAV2_MPPI_HAS_CUDA=1)
+  endif()
 endif()
 
 ament_export_dependencies(

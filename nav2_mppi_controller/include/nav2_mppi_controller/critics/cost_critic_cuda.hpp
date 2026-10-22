@@ -92,6 +92,10 @@ public:
     const unsigned char * costmap,
     const CostCriticDeviceScore & params,
     float * pose_costs);
+
+private:
+  struct DeviceState;
+  DeviceState * state_{nullptr};
 };
 
 /// @brief True if this library was built with CUDA scoring

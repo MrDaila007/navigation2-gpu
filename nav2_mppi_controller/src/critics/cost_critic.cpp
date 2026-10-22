@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <memory>
+#include <vector>
 #include "nav2_mppi_controller/critics/cost_critic.hpp"
 #include "nav2_mppi_controller/critics/cost_critic_cuda.hpp"
 #include "nav2_costmap_2d/inflation_layer_interface.hpp"
@@ -135,6 +136,97 @@ float CostCritic::findCircumscribedCost(
   return circumscribed_cost_;
 }
 
+void CostCritic::applyWeightAndPower(
+  CriticData & data, const Eigen::ArrayXf & repulsive, int strided_cols, bool all_collided)
+{
+  if (power_ > 1u) {
+    data.costs += (repulsive *
+      (weight_ / static_cast<float>(strided_cols))).pow(power_);
+  } else {
+    data.costs += repulsive * (weight_ / static_cast<float>(strided_cols));
+  }
+
+  data.fail_flag = all_collided;
+}
+
+void CostCritic::accumulateFromPoseCosts(
+  CriticData & data, const Eigen::ArrayXXf * gathered,
+  Eigen::ArrayXf & repulsive_cost, bool & all_trajectories_collide)
+{
+  auto * costmap = collision_checker_.getCostmap();
+  auto & collisions = data.trajectories_in_collision;
+  const bool track_collisions = !collisions.empty();
+  const bool near_goal = data.state.local_path_length < near_goal_distance_;
+
+  int strided_traj_cols = floor((data.trajectories.x.cols() - 1) / trajectory_point_step_) + 1;
+  int strided_traj_rows = data.trajectories.x.rows();
+  int outer_stride = strided_traj_rows * trajectory_point_step_;
+
+  const auto traj_x = Eigen::Map<const Eigen::ArrayXXf, 0,
+      Eigen::Stride<-1, -1>>(
+    data.trajectories.x.data(), strided_traj_rows, strided_traj_cols,
+    Eigen::Stride<-1, -1>(outer_stride, 1));
+  const auto traj_y = Eigen::Map<const Eigen::ArrayXXf, 0,
+      Eigen::Stride<-1, -1>>(
+    data.trajectories.y.data(), strided_traj_rows, strided_traj_cols,
+    Eigen::Stride<-1, -1>(outer_stride, 1));
+  const auto traj_yaw = Eigen::Map<const Eigen::ArrayXXf, 0,
+      Eigen::Stride<-1, -1>>(
+    data.trajectories.yaws.data(), strided_traj_rows, strided_traj_cols,
+    Eigen::Stride<-1, -1>(outer_stride, 1));
+
+  for (int i = 0; i < strided_traj_rows; ++i) {
+    bool trajectory_collide = false;
+    float pose_cost = 0.0f;
+    float & traj_cost = repulsive_cost(i);
+
+    for (int j = 0; j < strided_traj_cols; j++) {
+      float Tx = traj_x(i, j);
+      float Ty = traj_y(i, j);
+      unsigned int x_i = 0u, y_i = 0u;
+
+      // A null gather keeps the costmap lookup. A gathered array is indexed like
+      // trajectories.x when it has a column per time step, otherwise per stride.
+      if (gathered == nullptr) {
+        if (!worldToMapFloat(Tx, Ty, x_i, y_i)) {
+          pose_cost = 255.0f;  // NO_INFORMATION in float
+        } else {
+          pose_cost = static_cast<float>(costmap->getCost(getIndex(x_i, y_i)));
+          if (pose_cost < 1.0f) {
+            continue;  // In free space
+          }
+        }
+      } else {
+        const int time = j * static_cast<int>(trajectory_point_step_);
+        const Eigen::Index col = gathered->cols() == data.trajectories.x.cols() ?
+          static_cast<Eigen::Index>(time) : static_cast<Eigen::Index>(j);
+        pose_cost = (*gathered)(i, col);
+        if (pose_cost < 1.0f) {
+          continue;  // In free space
+        }
+      }
+
+      if (inCollision(pose_cost, Tx, Ty, traj_yaw(i, j))) {
+        traj_cost = collision_cost_;
+        trajectory_collide = true;
+        if (track_collisions) {collisions[i] = true;}
+        break;
+      }
+
+      // Let near-collision trajectory points be punished severely
+      // Note that we collision check based on the footprint actual,
+      // but score based on the center-point cost regardless
+      if (pose_cost >= static_cast<float>(near_collision_cost_)) {
+        traj_cost += critical_cost_;
+      } else if (!near_goal) {  // Generally prefer trajectories further from obstacles
+        traj_cost += pose_cost;
+      }
+    }
+
+    all_trajectories_collide &= trajectory_collide;
+  }
+}
+
 void CostCritic::score(CriticData & data)
 {
   if (!enabled_) {
@@ -177,80 +269,66 @@ void CostCritic::score(CriticData & data)
     near_goal = true;
   }
 
+  auto & collisions = data.trajectories_in_collision;
+  const bool track_collisions = !collisions.empty();
+  int strided_traj_cols = floor((data.trajectories.x.cols() - 1) / trajectory_point_step_) + 1;
+  int strided_traj_rows = data.trajectories.x.rows();
+
+  const bool device_center =
+    use_cuda_ && cuda_scorer_ && cost_critic_cuda_device_available() && !consider_footprint_;
+  if (device_center) {
+    CostCriticDeviceScore params;
+    params.origin_x = origin_x_;
+    params.origin_y = origin_y_;
+    params.resolution = resolution_;
+    params.size_x = size_x_;
+    params.size_y = size_y_;
+    params.collision_cost = collision_cost_;
+    params.critical_cost = critical_cost_;
+    params.near_collision_cost = near_collision_cost_;
+    params.is_tracking_unknown = is_tracking_unknown_;
+    params.near_goal = near_goal;
+    params.rows = strided_traj_rows;
+    params.time_cols = static_cast<int>(data.trajectories.x.cols());
+    params.point_step = static_cast<int>(trajectory_point_step_);
+    params.track_collisions = track_collisions;
+
+    Eigen::ArrayXf repulsive(strided_traj_rows);
+    repulsive.setZero();
+    std::vector<unsigned char> collided(static_cast<size_t>(strided_traj_rows), 0);
+    bool all_collided = true;
+    const bool scored = cuda_scorer_->score_center(
+      data.trajectories.x.data(),
+      data.trajectories.y.data(),
+      costmap->getCharMap(),
+      params,
+      repulsive.data(),
+      collided.empty() ? nullptr : collided.data(),
+      &all_collided);
+    if (scored) {
+      if (track_collisions) {
+        for (int i = 0; i < strided_traj_rows; ++i) {
+          collisions[i] = collided[static_cast<size_t>(i)] != 0;
+        }
+      }
+      applyWeightAndPower(data, repulsive, strided_traj_cols, all_collided);
+      return;
+    }
+
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      RCLCPP_WARN(
+        logger_,
+        "CostCritic CUDA center scoring failed. Scoring on the CPU instead.");
+    }
+  }
+
   Eigen::ArrayXf repulsive_cost(data.costs.rows());
   repulsive_cost.setZero();
   bool all_trajectories_collide = true;
-
-  auto & collisions = data.trajectories_in_collision;
-  const bool track_collisions = !collisions.empty();
-
-  int strided_traj_cols = floor((data.trajectories.x.cols() - 1) / trajectory_point_step_) + 1;
-  int strided_traj_rows = data.trajectories.x.rows();
-  int outer_stride = strided_traj_rows * trajectory_point_step_;
-
-  const auto traj_x = Eigen::Map<const Eigen::ArrayXXf, 0,
-      Eigen::Stride<-1, -1>>(
-    data.trajectories.x.data(), strided_traj_rows, strided_traj_cols,
-    Eigen::Stride<-1, -1>(outer_stride, 1));
-  const auto traj_y = Eigen::Map<const Eigen::ArrayXXf, 0,
-      Eigen::Stride<-1, -1>>(
-    data.trajectories.y.data(), strided_traj_rows, strided_traj_cols,
-    Eigen::Stride<-1, -1>(outer_stride, 1));
-  const auto traj_yaw = Eigen::Map<const Eigen::ArrayXXf, 0,
-      Eigen::Stride<-1, -1>>(
-    data.trajectories.yaws.data(), strided_traj_rows, strided_traj_cols,
-    Eigen::Stride<-1, -1>(outer_stride, 1));
-
-  for (int i = 0; i < strided_traj_rows; ++i) {
-    bool trajectory_collide = false;
-    float pose_cost = 0.0f;
-    float & traj_cost = repulsive_cost(i);
-
-    for (int j = 0; j < strided_traj_cols; j++) {
-      float Tx = traj_x(i, j);
-      float Ty = traj_y(i, j);
-      unsigned int x_i = 0u, y_i = 0u;
-
-      // The getCost doesn't use orientation
-      // The footprintCostAtPose will always return "INSCRIBED" if footprint is over it
-      // So the center point has more information than the footprint
-      if (!worldToMapFloat(Tx, Ty, x_i, y_i)) {
-        pose_cost = 255.0f;  // NO_INFORMATION in float
-      } else {
-        pose_cost = static_cast<float>(costmap->getCost(getIndex(x_i, y_i)));
-        if (pose_cost < 1.0f) {
-          continue;  // In free space
-        }
-      }
-
-      if (inCollision(pose_cost, Tx, Ty, traj_yaw(i, j))) {
-        traj_cost = collision_cost_;
-        trajectory_collide = true;
-        if (track_collisions) {collisions[i] = true;}
-        break;
-      }
-
-      // Let near-collision trajectory points be punished severely
-      // Note that we collision check based on the footprint actual,
-      // but score based on the center-point cost regardless
-      if (pose_cost >= static_cast<float>(near_collision_cost_)) {
-        traj_cost += critical_cost_;
-      } else if (!near_goal) {  // Generally prefer trajectories further from obstacles
-        traj_cost += pose_cost;
-      }
-    }
-
-    all_trajectories_collide &= trajectory_collide;
-  }
-
-  if (power_ > 1u) {
-    data.costs += (repulsive_cost *
-      (weight_ / static_cast<float>(strided_traj_cols))).pow(power_);
-  } else {
-    data.costs += repulsive_cost * (weight_ / static_cast<float>(strided_traj_cols));
-  }
-
-  data.fail_flag = all_trajectories_collide;
+  accumulateFromPoseCosts(data, nullptr, repulsive_cost, all_trajectories_collide);
+  applyWeightAndPower(data, repulsive_cost, strided_traj_cols, all_trajectories_collide);
 }
 
 }  // namespace mppi::critics
