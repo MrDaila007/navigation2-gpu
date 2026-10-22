@@ -14,12 +14,18 @@
 // limitations under the License.
 
 #include <cmath>
+#include <memory>
 #include "nav2_mppi_controller/critics/cost_critic.hpp"
+#include "nav2_mppi_controller/critics/cost_critic_cuda.hpp"
 #include "nav2_costmap_2d/inflation_layer_interface.hpp"
 #include "nav2_core/controller_exceptions.hpp"
 
 namespace mppi::critics
 {
+
+CostCritic::CostCritic() = default;
+
+CostCritic::~CostCritic() = default;
 
 void CostCritic::initialize()
 {
@@ -34,6 +40,7 @@ void CostCritic::initialize()
   getParam(near_goal_distance_, "near_goal_distance", 0.5f);
   getParam(inflation_layer_name_, "inflation_layer_name", std::string(""));
   getParam(trajectory_point_step_, "trajectory_point_step", 2);
+  getParam(use_cuda_, "use_cuda", false);
 
   // Normalized by cost value to put in same regime as other weights
   weight_ /= 254.0f;
@@ -132,6 +139,22 @@ void CostCritic::score(CriticData & data)
 {
   if (!enabled_) {
     return;
+  }
+
+  if (use_cuda_) {
+    if (!cuda_scorer_) {
+      cuda_scorer_ = std::make_unique<CostCriticCuda>();
+    }
+    if (!cost_critic_cuda_device_available()) {
+      static bool warned = false;
+      if (!warned) {
+        warned = true;
+        RCLCPP_WARN(
+          logger_,
+          "CostCritic use_cuda is true but no CUDA device is available. "
+          "Scoring on the CPU instead.");
+      }
+    }
   }
 
   // Setup cost information for various parts of the critic

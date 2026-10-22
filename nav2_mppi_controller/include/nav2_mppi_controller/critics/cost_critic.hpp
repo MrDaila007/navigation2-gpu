@@ -28,6 +28,8 @@
 namespace mppi::critics
 {
 
+class CostCriticCuda;
+
 /**
  * @class mppi::critics::CostCritic
  * @brief Critic objective function for avoiding obstacles using costmap's inflated cost
@@ -35,6 +37,9 @@ namespace mppi::critics
 class CostCritic : public CriticFunction
 {
 public:
+  CostCritic();
+  ~CostCritic() override;
+
   /**
     * @brief Initialize critic
     */
@@ -144,6 +149,9 @@ protected:
   std::string inflation_layer_name_;
 
   unsigned int power_{0};
+
+  bool use_cuda_{false};
+  std::unique_ptr<CostCriticCuda> cuda_scorer_;
 };
 
 }  // namespace mppi::critics

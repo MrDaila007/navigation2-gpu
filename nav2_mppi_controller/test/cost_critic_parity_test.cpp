@@ -28,6 +28,7 @@
 #include "nav2_costmap_2d/costmap_2d_ros.hpp"
 #include "nav2_mppi_controller/critic_data.hpp"
 #include "nav2_mppi_controller/critics/cost_critic.hpp"
+#include "nav2_mppi_controller/critics/cost_critic_cuda.hpp"
 #include "nav2_mppi_controller/models/control_sequence.hpp"
 #include "nav2_mppi_controller/models/path.hpp"
 #include "nav2_mppi_controller/models/state.hpp"
@@ -100,17 +101,19 @@ struct ClassicalCase
   std::vector<bool> collided;
 };
 
-void expect_classical(const ClassicalCase & c)
+// Builds the scenario, runs one critic named critic_name with the given use_cuda value, and
+// returns the resulting costs, fail flag and collision flags without asserting the formula
+void score_case(
+  const ClassicalCase & c, const std::string & critic_name, bool use_cuda_flag,
+  Eigen::ArrayXf & out_costs, bool & out_fail, std::vector<bool> & out_hits)
 {
   using namespace mppi;  // NOLINT
 
   ASSERT_EQ(static_cast<int>(c.samples.size()), c.batch);
-  ASSERT_EQ(static_cast<int>(c.repulsive.size()), c.batch);
-  ASSERT_EQ(static_cast<int>(c.collided.size()), c.batch);
 
-  auto node = std::make_shared<nav2::LifecycleNode>("cost_critic_parity_node");
+  auto node = std::make_shared<nav2::LifecycleNode>(critic_name + "_node");
   auto costmap_ros = std::make_shared<nav2_costmap_2d::Costmap2DROS>(
-    "cost_critic_parity_costmap", "", true);
+    critic_name + "_costmap", "", true);
   std::string handler_name = "parity";
   ParametersHandler param_handler(node, handler_name);
 
@@ -128,9 +131,9 @@ void expect_classical(const ClassicalCase & c)
   float near_goal_distance = c.near_goal_distance;
   int point_step = c.point_step;
   bool enabled = c.enabled;
-  bool use_cuda = false;
+  bool use_cuda = use_cuda_flag;
   {
-    auto getParam = param_handler.getParamGetter("classical");
+    auto getParam = param_handler.getParamGetter(critic_name);
     getParam(consider_footprint, "consider_footprint", c.consider_footprint);
     getParam(power, "cost_power", c.power);
     getParam(cost_weight, "cost_weight", c.cost_weight);
@@ -140,7 +143,7 @@ void expect_classical(const ClassicalCase & c)
     getParam(near_goal_distance, "near_goal_distance", c.near_goal_distance);
     getParam(point_step, "trajectory_point_step", c.point_step);
     getParam(enabled, "enabled", c.enabled);
-    getParam(use_cuda, "use_cuda", false);
+    getParam(use_cuda, "use_cuda", use_cuda_flag);
   }
 
   rclcpp_lifecycle::State lstate;
@@ -158,7 +161,7 @@ void expect_classical(const ClassicalCase & c)
   }
 
   mppi::critics::CostCritic critic;
-  critic.on_configure(node, "mppi", "classical", costmap_ros, &param_handler);
+  critic.on_configure(node, "mppi", critic_name, costmap_ros, &param_handler);
 
   models::State state;
   state.local_path_length = c.local_path_length;
@@ -185,19 +188,37 @@ void expect_classical(const ClassicalCase & c)
 
   critic.score(data);
 
+  out_costs = costs;
+  out_fail = data.fail_flag;
+  out_hits.assign(
+    data.trajectories_in_collision.begin(), data.trajectories_in_collision.end());
+}
+
+void expect_classical(const ClassicalCase & c)
+{
+  ASSERT_EQ(static_cast<int>(c.samples.size()), c.batch);
+  ASSERT_EQ(static_cast<int>(c.repulsive.size()), c.batch);
+  ASSERT_EQ(static_cast<int>(c.collided.size()), c.batch);
+
+  Eigen::ArrayXf costs;
+  bool fail = false;
+  std::vector<bool> hits;
+  score_case(c, "classical", false, costs, fail, hits);
+  ASSERT_EQ(static_cast<int>(costs.size()), c.batch);
+
   if (!c.enabled) {
     // A disabled critic does not score at all
     for (int i = 0; i < c.batch; ++i) {
       EXPECT_EQ(costs(i), 0.0f) << "trajectory " << i;
     }
-    EXPECT_FALSE(data.fail_flag);
+    EXPECT_FALSE(fail);
     if (c.track_collisions) {
-      ASSERT_EQ(static_cast<int>(data.trajectories_in_collision.size()), c.batch);
+      ASSERT_EQ(static_cast<int>(hits.size()), c.batch);
       for (int i = 0; i < c.batch; ++i) {
-        EXPECT_FALSE(data.trajectories_in_collision[i]) << "trajectory " << i;
+        EXPECT_FALSE(hits[i]) << "trajectory " << i;
       }
     } else {
-      EXPECT_TRUE(data.trajectories_in_collision.empty());
+      EXPECT_TRUE(hits.empty());
     }
     return;
   }
@@ -217,16 +238,15 @@ void expect_classical(const ClassicalCase & c)
   for (int i = 0; i < c.batch; ++i) {
     EXPECT_EQ(costs(i), expected(i)) << "trajectory " << i;
   }
-  EXPECT_EQ(data.fail_flag, c.fail);
+  EXPECT_EQ(fail, c.fail);
 
   if (c.track_collisions) {
-    ASSERT_EQ(static_cast<int>(data.trajectories_in_collision.size()), c.batch);
+    ASSERT_EQ(static_cast<int>(hits.size()), c.batch);
     for (int i = 0; i < c.batch; ++i) {
-      EXPECT_EQ(static_cast<bool>(data.trajectories_in_collision[i]), c.collided[i]) <<
-        "trajectory " << i;
+      EXPECT_EQ(hits[i], c.collided[i]) << "trajectory " << i;
     }
   } else {
-    EXPECT_TRUE(data.trajectories_in_collision.empty());
+    EXPECT_TRUE(hits.empty());
   }
 }
 
@@ -431,3 +451,39 @@ TEST(CostCriticParity, MixedFailFlag) {expect_classical(MixedFailFlag_case());}
 TEST(CostCriticParity, AllCollide) {expect_classical(AllCollide_case());}
 TEST(CostCriticParity, EmptyCollisionVector) {expect_classical(EmptyCollisionVector_case());}
 TEST(CostCriticParity, DisabledCritic) {expect_classical(DisabledCritic_case());}
+
+TEST(CostCriticParity, CudaFlagOffDoesNotLaunch)
+{
+  using namespace mppi::critics;  // NOLINT
+  reset_cost_critic_cuda_launch_count();
+  const int before = cost_critic_cuda_launch_count();
+  // Score SumInflated through a critic whose use_cuda parameter is false.
+  expect_classical(SumInflated_case());
+  EXPECT_FALSE(cost_critic_cuda_compiled());
+  EXPECT_EQ(cost_critic_cuda_launch_count(), before);
+}
+
+TEST(CostCriticParity, CudaFlagOnMatchesCpuWhenDeviceMissing)
+{
+  using namespace mppi::critics;  // NOLINT
+  if (cost_critic_cuda_device_available()) {
+    GTEST_SKIP();
+  }
+  reset_cost_critic_cuda_launch_count();
+  const int before = cost_critic_cuda_launch_count();
+  Eigen::ArrayXf cpu_costs;
+  Eigen::ArrayXf cuda_costs;
+  bool cpu_fail = false;
+  bool cuda_fail = false;
+  std::vector<bool> cpu_hits;
+  std::vector<bool> cuda_hits;
+  score_case(SumInflated_case(), "cpu_critic", false, cpu_costs, cpu_fail, cpu_hits);
+  score_case(SumInflated_case(), "cuda_critic", true, cuda_costs, cuda_fail, cuda_hits);
+  ASSERT_EQ(cpu_costs.size(), cuda_costs.size());
+  for (int i = 0; i < cpu_costs.size(); ++i) {
+    EXPECT_EQ(cpu_costs(i), cuda_costs(i));
+  }
+  EXPECT_EQ(cpu_fail, cuda_fail);
+  EXPECT_EQ(cpu_hits, cuda_hits);
+  EXPECT_EQ(cost_critic_cuda_launch_count(), before);
+}
