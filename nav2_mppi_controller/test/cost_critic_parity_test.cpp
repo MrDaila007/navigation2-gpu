@@ -778,9 +778,22 @@ TEST(CostCriticParity, CudaResizeUsesNewGrid)
     return;
   }
   // (-0.3, -0.3) is also off the old map, so the lethal score alone cannot tell stale
-  // geometry from new. A free sample at (1.0, 1.0) is cell (10, 10) on the new grid
-  // and sits inside the old 5 m map, so a stale origin or resolution would misread it.
+  // geometry from new. The free samples below land on free cells of the new grid
+  // (origin -1, resolution 0.2, only cell (3, 3) lethal). (1.0, 1.0) is cell (10, 10)
+  // on the new grid; it does not catch a stale origin, only stale size or resolution.
   score_both(1.0f, 1.0f, false, "after resize, free cell");
+  if (::testing::Test::HasFatalFailure()) {
+    return;
+  }
+  // (0.7, 0.7): new cell (8, 8) is free. With the old origin and the new resolution
+  // it would be 0.7 / 0.2 = 3.5, cell (3, 3), which is lethal.
+  score_both(0.7f, 0.7f, false, "after resize, stale origin with new resolution");
+  if (::testing::Test::HasFatalFailure()) {
+    return;
+  }
+  // (0.35, 0.35): new cell (6, 6) is free. With the old origin and the old resolution
+  // it would be 0.35 / 0.1 = 3.5, cell (3, 3), which is lethal.
+  score_both(0.35f, 0.35f, false, "after resize, stale origin with old resolution");
 }
 #endif
 
