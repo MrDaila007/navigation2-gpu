@@ -274,8 +274,9 @@ void CostCritic::score(CriticData & data)
   int strided_traj_cols = floor((data.trajectories.x.cols() - 1) / trajectory_point_step_) + 1;
   int strided_traj_rows = data.trajectories.x.rows();
 
-  const bool device_center =
-    use_cuda_ && cuda_scorer_ && cost_critic_cuda_device_available() && !consider_footprint_;
+  const bool device_ready =
+    use_cuda_ && cuda_scorer_ && cost_critic_cuda_device_available();
+  const bool device_center = device_ready && !consider_footprint_;
   if (device_center) {
     CostCriticDeviceScore params;
     params.origin_x = origin_x_;
@@ -331,7 +332,49 @@ void CostCritic::score(CriticData & data)
   Eigen::ArrayXf repulsive_cost(data.costs.rows());
   repulsive_cost.setZero();
   bool all_trajectories_collide = true;
-  accumulateFromPoseCosts(data, nullptr, repulsive_cost, all_trajectories_collide);
+
+  // Footprints stay on the host. The device only gathers center costs.
+  // 255 is outside the map. A cost below 1 is free and skips the footprint.
+  Eigen::ArrayXXf gathered_costs;
+  const Eigen::ArrayXXf * gathered = nullptr;
+  if (device_ready && consider_footprint_) {
+    CostCriticDeviceScore params;
+    params.origin_x = origin_x_;
+    params.origin_y = origin_y_;
+    params.resolution = resolution_;
+    params.size_x = size_x_;
+    params.size_y = size_y_;
+    params.collision_cost = collision_cost_;
+    params.critical_cost = critical_cost_;
+    params.near_collision_cost = near_collision_cost_;
+    params.is_tracking_unknown = is_tracking_unknown_;
+    params.near_goal = near_goal;
+    params.rows = strided_traj_rows;
+    params.time_cols = static_cast<int>(data.trajectories.x.cols());
+    params.point_step = static_cast<int>(trajectory_point_step_);
+    params.track_collisions = track_collisions;
+
+    gathered_costs.resize(strided_traj_rows, strided_traj_cols);
+    const bool gathered_ok = cuda_scorer_->gather_center(
+      data.trajectories.x.data(),
+      data.trajectories.y.data(),
+      costmap->getCharMap(),
+      params,
+      gathered_costs.data());
+    if (gathered_ok) {
+      gathered = &gathered_costs;
+    } else {
+      static bool warned = false;
+      if (!warned) {
+        warned = true;
+        RCLCPP_WARN(
+          logger_,
+          "CostCritic CUDA footprint gather failed. Scoring on the CPU instead.");
+      }
+    }
+  }
+
+  accumulateFromPoseCosts(data, gathered, repulsive_cost, all_trajectories_collide);
   applyWeightAndPower(data, repulsive_cost, strided_traj_cols, all_trajectories_collide);
 }
 

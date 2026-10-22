@@ -123,6 +123,12 @@ void score_case(
   // Costmap parameter must exist before the costmap reads it in on_configure
   costmap_ros->declare_parameter(
     "track_unknown_space", rclcpp::ParameterValue(c.track_unknown));
+  if (c.consider_footprint) {
+    costmap_ros->declare_parameter("plugins", std::vector<std::string>{});
+    costmap_ros->declare_parameter(
+      "footprint",
+      std::string("[[0.2, 0.2], [0.2, -0.2], [-0.2, -0.2], [-0.2, 0.2]]"));
+  }
 
   // Critic parameters, declared with the same C++ types as CostCritic::initialize
   bool consider_footprint = c.consider_footprint;
@@ -439,6 +445,71 @@ ClassicalCase DisabledCritic_case()
   return c;
 }
 
+// Lethal cells on the border of the 5x5 block centered on cell (10, 10).
+// Corners belong to both edges and are painted twice at the same cost.
+void paint_lethal_ring(std::vector<PaintedCell> & painted)
+{
+  for (unsigned int my = 8; my <= 12; ++my) {
+    painted.push_back({8, my, 254});
+    painted.push_back({12, my, 254});
+  }
+  for (unsigned int mx = 8; mx <= 12; ++mx) {
+    painted.push_back({mx, 8, 254});
+    painted.push_back({mx, 12, 254});
+  }
+}
+
+// One footprint sample at cell (10, 10). The center is painted after any ring.
+ClassicalCase footprint_center_case(
+  unsigned char center_cost, bool ring, float repulsive, bool collided, bool fail)
+{
+  ClassicalCase c;
+  c.consider_footprint = true;
+  c.cost_weight = 254.0f;
+  c.batch = 1;
+  c.time_steps = 1;
+  c.point_step = 1;
+  if (ring) {
+    paint_lethal_ring(c.painted);
+  }
+  c.painted.push_back({10, 10, center_cost});
+  c.samples = {{at_cell(10, 10)}};
+  c.repulsive = {repulsive};
+  c.collided = {collided};
+  c.fail = fail;
+  return c;
+}
+
+ClassicalCase FootprintHit_case()
+{
+  return footprint_center_case(200, true, 1000000.0f, true, true);
+}
+
+ClassicalCase FootprintClear_case()
+{
+  return footprint_center_case(200, false, 200.0f, false, false);
+}
+
+ClassicalCase FreeCenterSkipsFootprint_case()
+{
+  return footprint_center_case(0, true, 0.0f, false, false);
+}
+
+ClassicalCase InscribedCenterFootprintClear_case()
+{
+  return footprint_center_case(253, false, 300.0f, false, false);
+}
+
+ClassicalCase FootprintEarlyExit_case()
+{
+  ClassicalCase c = footprint_center_case(200, true, 1000000.0f, true, true);
+  c.time_steps = 2;
+  c.point_step = 1;
+  c.samples = {{at_cell(10, 10), at_cell(20, 10)}};
+  c.painted.push_back({20, 10, 40});
+  return c;
+}
+
 // Free trajectory already marked by an earlier critic, plus a lethal trajectory.
 // The free flag must stay true. The lethal trajectory must become true.
 ClassicalCase PreseededFreeCollision_case()
@@ -509,6 +580,13 @@ TEST(CostCriticParity, MixedFailFlag) {expect_classical(MixedFailFlag_case());}
 TEST(CostCriticParity, AllCollide) {expect_classical(AllCollide_case());}
 TEST(CostCriticParity, EmptyCollisionVector) {expect_classical(EmptyCollisionVector_case());}
 TEST(CostCriticParity, DisabledCritic) {expect_classical(DisabledCritic_case());}
+TEST(CostCriticParity, FootprintHit) {expect_classical(FootprintHit_case());}
+TEST(CostCriticParity, FootprintClear) {expect_classical(FootprintClear_case());}
+TEST(CostCriticParity, FreeCenterSkipsFootprint) {expect_classical(FreeCenterSkipsFootprint_case());}
+TEST(CostCriticParity, InscribedCenterFootprintClear) {
+  expect_classical(InscribedCenterFootprintClear_case());
+}
+TEST(CostCriticParity, FootprintEarlyExit) {expect_classical(FootprintEarlyExit_case());}
 
 TEST(CostCriticParity, CudaFlagOffDoesNotLaunch)
 {
@@ -569,6 +647,17 @@ TEST(CostCriticParity, CudaEmptyCollisionVector) {
   expect_cuda_matches_classical(EmptyCollisionVector_case());
 }
 TEST(CostCriticParity, CudaDisabledCritic) {expect_cuda_matches_classical(DisabledCritic_case());}
+TEST(CostCriticParity, CudaFootprintHit) {expect_cuda_matches_classical(FootprintHit_case());}
+TEST(CostCriticParity, CudaFootprintClear) {expect_cuda_matches_classical(FootprintClear_case());}
+TEST(CostCriticParity, CudaFreeCenterSkipsFootprint) {
+  expect_cuda_matches_classical(FreeCenterSkipsFootprint_case());
+}
+TEST(CostCriticParity, CudaInscribedCenterFootprintClear) {
+  expect_cuda_matches_classical(InscribedCenterFootprintClear_case());
+}
+TEST(CostCriticParity, CudaFootprintEarlyExit) {
+  expect_cuda_matches_classical(FootprintEarlyExit_case());
+}
 #endif
 
 TEST(CostCriticParity, PreseededFreeCollisionStaysTrue)
