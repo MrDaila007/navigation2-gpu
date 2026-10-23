@@ -57,7 +57,8 @@ protected:
   /**
    * @brief Score the batch from per-pose center costs
    * @param data Critic data to score and update
-   * @param gathered Column-major center costs, or null to read each pose with costAtPose
+   * @param gathered Reserved for device-gathered center costs, currently unused: every pose
+   * is read with costAtPose
    */
   void scoreFromCenters(CriticData & data, const float * gathered);
 

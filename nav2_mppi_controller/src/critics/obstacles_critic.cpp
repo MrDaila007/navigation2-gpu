@@ -152,7 +152,7 @@ void ObstaclesCritic::score(CriticData & data)
   scoreFromCenters(data, nullptr);
 }
 
-void ObstaclesCritic::scoreFromCenters(CriticData & data, const float * gathered)
+void ObstaclesCritic::scoreFromCenters(CriticData & data, const float * /*gathered*/)
 {
   // If near the goal, don't apply the preferential term since the goal is near obstacles
   bool near_goal = false;
@@ -179,12 +179,7 @@ void ObstaclesCritic::scoreFromCenters(CriticData & data, const float * gathered
     repulsive_cost(i) = 0.0f;
 
     for (unsigned int j = 0; j != traj_len; j++) {
-      if (gathered != nullptr) {
-        pose_cost.cost = gathered[j * batch_size + i];
-        pose_cost.using_footprint = false;
-      } else {
-        pose_cost = costAtPose(traj.x(i, j), traj.y(i, j), traj.yaws(i, j));
-      }
+      pose_cost = costAtPose(traj.x(i, j), traj.y(i, j), traj.yaws(i, j));
       if (pose_cost.cost < 1.0f) {continue;}  // In free space
 
       if (inCollision(pose_cost.cost)) {
