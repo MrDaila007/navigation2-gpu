@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -1165,5 +1166,38 @@ TEST(ObstaclesCriticParity, CudaResizeUsesNewGrid)
   // (0.35, 0.35): new cell (6, 6) is free. With the old origin and the old resolution
   // it would be 0.35 / 0.1 = 3.5, cell (3, 3), which is lethal.
   score_both(0.35f, 0.35f, false, "after resize, stale origin with old resolution");
+}
+#endif
+
+#if NAV2_MPPI_HAS_CUDA
+TEST(ObstaclesCriticParity, RecordsTransferAndKernelTime)
+{
+  using namespace mppi::critics;  // NOLINT
+  if (!obstacles_critic_cuda_device_available()) {
+    GTEST_SKIP();
+  }
+
+  // 2000 samples of 56 poses, every pose at the center of free cell (5, 5)
+  Case c;
+  c.time_steps = 56;
+  c.consider_footprint = false;
+  c.traj.assign(2000, std::vector<Step>(c.time_steps, cell_step(5, 5, 0.0f)));
+
+  reset_obstacles_critic_cuda_launch_count();
+  Eigen::ArrayXf costs;
+  bool fail = false;
+  std::vector<bool> hits;
+  ASSERT_NO_FATAL_FAILURE(score_case(c, "timing_cuda", true, costs, fail, hits));
+
+  const auto timings = obstacles_critic_cuda_last_timings();
+  EXPECT_GE(timings.costmap_h2d_ms, 0.f);
+  EXPECT_GE(timings.trajectory_h2d_ms, 0.f);
+  EXPECT_GE(timings.kernel_ms, 0.f);
+  EXPECT_GE(timings.d2h_ms, 0.f);
+  EXPECT_GT(obstacles_critic_cuda_launch_count(), 0);
+  std::cout << "ObstaclesCritic CUDA timings (ms): costmap_h2d=" << timings.costmap_h2d_ms <<
+    " trajectory_h2d=" << timings.trajectory_h2d_ms <<
+    " kernel=" << timings.kernel_ms <<
+    " d2h=" << timings.d2h_ms << std::endl;
 }
 #endif
