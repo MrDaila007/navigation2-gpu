@@ -84,7 +84,7 @@ public:
 
   /**
    * @brief Gather the center cost of every sample without any reduction
-   * @param pose_costs [out] Cost per sample, same layout as x
+   * @param pose_costs [out] Column-major (rows, strided_cols), index pose_costs[j * rows + i]
    * @return false if the device did not produce a buffer the caller may read
    */
   bool gather_center(

@@ -62,6 +62,15 @@ float elapsed_ms(cudaEvent_t begin, cudaEvent_t end)
   return ms;
 }
 
+// A device-to-host copy is already queued. Wait for that write, then clear the
+// sticky error, before returning so the caller can reuse the host buffer.
+bool fail_after_d2h(cudaStream_t stream)
+{
+  cudaStreamSynchronize(stream);
+  cudaGetLastError();
+  return false;
+}
+
 __device__ bool center_in_collision(float pose_cost, bool is_tracking_unknown)
 {
   const unsigned char score_cost = static_cast<unsigned char>(pose_cost);
@@ -366,27 +375,30 @@ bool CostCriticCuda::score_center(
   }
   if (cudaMemcpyAsync(
       repulsive, state_->repulsive, rows * sizeof(float),
-      cudaMemcpyDeviceToHost, stream) != cudaSuccess ||
-    cudaMemcpyAsync(
-      collided, state_->collided, rows * sizeof(unsigned char),
       cudaMemcpyDeviceToHost, stream) != cudaSuccess)
   {
     return false;
+  }
+  if (cudaMemcpyAsync(
+      collided, state_->collided, rows * sizeof(unsigned char),
+      cudaMemcpyDeviceToHost, stream) != cudaSuccess)
+  {
+    return fail_after_d2h(stream);
   }
   unsigned int all_flag = 0u;
   if (cudaMemcpyAsync(
       &all_flag, state_->all_collided, sizeof(all_flag),
       cudaMemcpyDeviceToHost, stream) != cudaSuccess)
   {
-    return false;
+    return fail_after_d2h(stream);
   }
   if (cudaEventRecord(state_->ev_d2h_end, stream) != cudaSuccess) {
-    return false;
+    return fail_after_d2h(stream);
   }
   // The host repulsive pointer is written by the copy above. Wait until that
   // write is visible before the caller reads it.
   if (cudaStreamSynchronize(stream) != cudaSuccess) {
-    return false;
+    return fail_after_d2h(stream);
   }
 
   g_last_timings.costmap_h2d_ms = elapsed_ms(state_->ev_costmap_begin, state_->ev_traj_begin);
@@ -479,12 +491,12 @@ bool CostCriticCuda::gather_center(
     return false;
   }
   if (cudaEventRecord(state_->ev_d2h_end, stream) != cudaSuccess) {
-    return false;
+    return fail_after_d2h(stream);
   }
   // The host pose-cost pointer is written by the copy above. Wait until that
   // write is visible before the caller reads it.
   if (cudaStreamSynchronize(stream) != cudaSuccess) {
-    return false;
+    return fail_after_d2h(stream);
   }
 
   g_last_timings.costmap_h2d_ms = elapsed_ms(state_->ev_costmap_begin, state_->ev_traj_begin);

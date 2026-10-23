@@ -446,18 +446,25 @@ ClassicalCase DisabledCritic_case()
   return c;
 }
 
-// Lethal cells on the border of the 5x5 block centered on cell (10, 10).
+// Lethal cells on the border of the 5x5 block centered on (cx, cy).
 // Corners belong to both edges and are painted twice at the same cost.
+void paint_lethal_ring_at(
+  std::vector<PaintedCell> & painted, unsigned int cx, unsigned int cy)
+{
+  for (unsigned int my = cy - 2; my <= cy + 2; ++my) {
+    painted.push_back({cx - 2, my, 254});
+    painted.push_back({cx + 2, my, 254});
+  }
+  for (unsigned int mx = cx - 2; mx <= cx + 2; ++mx) {
+    painted.push_back({mx, cy - 2, 254});
+    painted.push_back({mx, cy + 2, 254});
+  }
+}
+
+// Lethal cells on the border of the 5x5 block centered on cell (10, 10).
 void paint_lethal_ring(std::vector<PaintedCell> & painted)
 {
-  for (unsigned int my = 8; my <= 12; ++my) {
-    painted.push_back({8, my, 254});
-    painted.push_back({12, my, 254});
-  }
-  for (unsigned int mx = 8; mx <= 12; ++mx) {
-    painted.push_back({mx, 8, 254});
-    painted.push_back({mx, 12, 254});
-  }
+  paint_lethal_ring_at(painted, 10, 10);
 }
 
 // One footprint sample at cell (10, 10). The center is painted after any ring.
@@ -508,6 +515,54 @@ ClassicalCase FootprintEarlyExit_case()
   c.point_step = 1;
   c.samples = {{at_cell(10, 10), at_cell(20, 10)}};
   c.painted.push_back({20, 10, 40});
+  return c;
+}
+
+// batch 2, five time columns, point_step 2. Sampled columns are 0, 2, and 4.
+// Trajectory 0 is lethal only on skipped column 1; its even columns are clear
+// and sum to 60. Trajectory 1 is lethal on even column 2 and scores the
+// collision cost. Those totals differ. rows is not the strided column count,
+// so a swapped i/j writes trajectory 0's last even cost to the wrong slot.
+// Using j as the time index reads the skipped lethal column and the free odd
+// column instead of the even ones.
+ClassicalCase FootprintStridedBatch_case()
+{
+  ClassicalCase c;
+  c.consider_footprint = true;
+  c.cost_weight = 254.0f;
+  c.batch = 2;
+  c.time_steps = 5;
+  c.point_step = 2;
+
+  const unsigned int y_at_time[5] = {6, 14, 22, 30, 38};
+  const unsigned char traj0_cost[5] = {10, 200, 20, 0, 30};
+  const unsigned char traj1_cost[5] = {15, 0, 200, 0, 25};
+  const bool traj0_lethal[5] = {false, true, false, false, false};
+  const bool traj1_lethal[5] = {false, false, true, false, false};
+
+  std::vector<Sample> row0;
+  std::vector<Sample> row1;
+  for (unsigned int t = 0; t < 5; ++t) {
+    const unsigned int y = y_at_time[t];
+    if (traj0_lethal[t]) {
+      paint_lethal_ring_at(c.painted, 8, y);
+    }
+    if (traj0_cost[t] != 0) {
+      c.painted.push_back({8, y, traj0_cost[t]});
+    }
+    if (traj1_lethal[t]) {
+      paint_lethal_ring_at(c.painted, 24, y);
+    }
+    if (traj1_cost[t] != 0) {
+      c.painted.push_back({24, y, traj1_cost[t]});
+    }
+    row0.push_back(at_cell(8, y));
+    row1.push_back(at_cell(24, y));
+  }
+  c.samples = {row0, row1};
+  c.repulsive = {60.0f, 1000000.0f};
+  c.collided = {false, true};
+  c.fail = false;
   return c;
 }
 
@@ -588,6 +643,7 @@ TEST(CostCriticParity, InscribedCenterFootprintClear) {
   expect_classical(InscribedCenterFootprintClear_case());
 }
 TEST(CostCriticParity, FootprintEarlyExit) {expect_classical(FootprintEarlyExit_case());}
+TEST(CostCriticParity, FootprintStridedBatch) {expect_classical(FootprintStridedBatch_case());}
 
 TEST(CostCriticParity, CudaFlagOffDoesNotLaunch)
 {
@@ -658,6 +714,9 @@ TEST(CostCriticParity, CudaInscribedCenterFootprintClear) {
 }
 TEST(CostCriticParity, CudaFootprintEarlyExit) {
   expect_cuda_matches_classical(FootprintEarlyExit_case());
+}
+TEST(CostCriticParity, CudaFootprintStridedBatch) {
+  expect_cuda_matches_classical(FootprintStridedBatch_case());
 }
 
 TEST(CostCriticParity, CudaResizeUsesNewGrid)

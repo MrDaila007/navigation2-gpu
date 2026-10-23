@@ -136,7 +136,7 @@ protected:
 
   /**
    * @brief Sum per-pose costs into one repulsive value per trajectory
-   * @param gathered Pose costs laid out like trajectories, or null to read the costmap
+   * @param gathered Column-major (rows, strided_cols), index gathered[j * rows + i], or null to read the costmap
    */
   void accumulateFromPoseCosts(
     CriticData & data, const Eigen::ArrayXXf * gathered,
