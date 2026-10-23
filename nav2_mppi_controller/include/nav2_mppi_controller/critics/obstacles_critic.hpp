@@ -57,8 +57,8 @@ protected:
   /**
    * @brief Score the batch from per-pose center costs
    * @param data Critic data to score and update
-   * @param gathered Reserved for device-gathered center costs, currently unused: every pose
-   * is read with costAtPose
+   * @param gathered Column-major center costs at time * rows + row, or nullptr to read
+   * each center with costAtPose
    */
   void scoreFromCenters(CriticData & data, const float * gathered);
 
@@ -76,7 +76,8 @@ protected:
     * @param theta theta of pose
     * @return Collision information at pose
     */
-  inline CollisionCost costAtPose(float x, float y, float theta);
+  inline CollisionCost costAtPose(
+    float x, float y, float theta, const float * center_cost = nullptr);
 
   /**
     * @brief Distance to obstacle from cost

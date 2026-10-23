@@ -87,8 +87,9 @@ target_link_libraries(mppi_motion_models PUBLIC
 
 option(NAV2_MPPI_CUDA "Build MPPI CostCritic CUDA scoring" OFF)
 
-# OFF keeps the stub. ON replaces it with the device kernel.
+# OFF keeps each stub. ON replaces that stub with its device kernel. Do not compile both.
 set(MPPI_COST_CRITIC_CUDA_SRC src/critics/cost_critic_cuda_stub.cpp)
+set(MPPI_OBSTACLES_CRITIC_CUDA_SRC src/critics/obstacles_critic_cuda_stub.cpp)
 if(NAV2_MPPI_CUDA)
   # nav2_package() adds -Werror for every language. nvcc treats the following
   # -MD as the argument of -Werror, so keep those host flags on C++ only.
@@ -124,6 +125,7 @@ if(NAV2_MPPI_CUDA)
   find_package(CUDAToolkit REQUIRED)
   set(CMAKE_CUDA_STANDARD 17)
   set(MPPI_COST_CRITIC_CUDA_SRC src/critics/cost_critic_cuda.cu)
+  set(MPPI_OBSTACLES_CRITIC_CUDA_SRC src/critics/obstacles_critic_cuda.cu)
 endif()
 
 add_library(mppi_critics SHARED
@@ -134,7 +136,7 @@ add_library(mppi_critics SHARED
   src/critics/goal_angle_critic.cpp
   src/critics/mecanum_critic.cpp
   src/critics/obstacles_critic.cpp
-  src/critics/obstacles_critic_cuda_stub.cpp
+  ${MPPI_OBSTACLES_CRITIC_CUDA_SRC}
   src/critics/omni_constraint_critic.cpp
   src/critics/path_align_critic.cpp
   src/critics/path_angle_critic.cpp

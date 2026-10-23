@@ -14,6 +14,8 @@
 // limitations under the License.
 
 #include <cmath>
+#include <vector>
+
 #include "nav2_mppi_controller/critics/obstacles_critic.hpp"
 #include "nav2_costmap_2d/inflation_layer_interface.hpp"
 #include "nav2_core/controller_exceptions.hpp"
@@ -146,13 +148,46 @@ void ObstaclesCritic::score(CriticData & data)
           "ObstaclesCritic use_cuda is true but no CUDA device is available. "
           "Scoring on the CPU instead.");
       }
+    } else {
+      ObstaclesCriticDeviceGather params;
+      params.origin_x = costmap_->getOriginX();
+      params.origin_y = costmap_->getOriginY();
+      params.resolution = costmap_->getResolution();
+      params.size_x = costmap_->getSizeInCellsX();
+      params.size_y = costmap_->getSizeInCellsY();
+      params.rows = static_cast<int>(data.trajectories.x.rows());
+      params.time_cols = static_cast<int>(data.trajectories.x.cols());
+
+      const size_t pose_n =
+        static_cast<size_t>(params.rows) * static_cast<size_t>(params.time_cols);
+      std::vector<float> pose_costs(pose_n);
+      const bool gathered = cuda_scorer_->gather_center(
+        data.trajectories.x.data(),
+        data.trajectories.y.data(),
+        costmap_->getCharMap(),
+        params,
+        pose_costs.data());
+      if (gathered) {
+        scoreFromCenters(data, pose_costs.data());
+        return;
+      }
+
+      static bool gather_warned = false;
+      if (!gather_warned) {
+        gather_warned = true;
+        RCLCPP_WARN(
+          logger_,
+          "ObstaclesCritic CUDA center gather failed. Scoring on the CPU instead.");
+      }
+      scoreFromCenters(data, nullptr);
+      return;
     }
   }
 
   scoreFromCenters(data, nullptr);
 }
 
-void ObstaclesCritic::scoreFromCenters(CriticData & data, const float * /*gathered*/)
+void ObstaclesCritic::scoreFromCenters(CriticData & data, const float * gathered)
 {
   // If near the goal, don't apply the preferential term since the goal is near obstacles
   bool near_goal = false;
@@ -179,7 +214,12 @@ void ObstaclesCritic::scoreFromCenters(CriticData & data, const float * /*gather
     repulsive_cost(i) = 0.0f;
 
     for (unsigned int j = 0; j != traj_len; j++) {
-      pose_cost = costAtPose(traj.x(i, j), traj.y(i, j), traj.yaws(i, j));
+      if (gathered == nullptr) {
+        pose_cost = costAtPose(traj.x(i, j), traj.y(i, j), traj.yaws(i, j));
+      } else {
+        const float center_cost = gathered[static_cast<size_t>(j) * batch_size + i];
+        pose_cost = costAtPose(traj.x(i, j), traj.y(i, j), traj.yaws(i, j), &center_cost);
+      }
       if (pose_cost.cost < 1.0f) {continue;}  // In free space
 
       if (inCollision(pose_cost.cost)) {
@@ -247,17 +287,22 @@ bool ObstaclesCritic::inCollision(float cost) const
   return false;
 }
 
-CollisionCost ObstaclesCritic::costAtPose(float x, float y, float theta)
+CollisionCost ObstaclesCritic::costAtPose(
+  float x, float y, float theta, const float * center_cost)
 {
   CollisionCost collision_cost;
   float & cost = collision_cost.cost;
   collision_cost.using_footprint = false;
-  unsigned int x_i, y_i;
-  if (!collision_checker_.worldToMap(x, y, x_i, y_i)) {
-    cost = nav2_costmap_2d::NO_INFORMATION;
-    return collision_cost;
+  if (center_cost == nullptr) {
+    unsigned int x_i, y_i;
+    if (!collision_checker_.worldToMap(x, y, x_i, y_i)) {
+      cost = nav2_costmap_2d::NO_INFORMATION;
+      return collision_cost;
+    }
+    cost = collision_checker_.pointCost(x_i, y_i);
+  } else {
+    cost = *center_cost;
   }
-  cost = collision_checker_.pointCost(x_i, y_i);
 
   if (consider_footprint_ &&
     (cost >= possible_collision_cost_ || possible_collision_cost_ < 1.0f))
