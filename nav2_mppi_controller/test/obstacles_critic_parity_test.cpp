@@ -73,6 +73,8 @@ struct Inflation
   float scale{0.0f};
   float radius{0.0f};
   float inscribed{0.0f};
+  // Cost the inflation layer gives at the circumscribed radius, used by footprint cases
+  float circumscribed_cost{0.0f};
 };
 
 // One trajectory pose. cost is the cost the critic reads at the pose center. When paint is
@@ -86,16 +88,24 @@ struct Step
   unsigned int my;
   float cost;
   bool paint;
+  // Cost the footprint check is expected to return when the center cost reaches it. Negative
+  // means the pose never reaches the footprint check, so the center cost is what is scored.
+  float footprint_cost{-1.0f};
 };
 
 Step cell_step(unsigned int mx, unsigned int my, float cost)
 {
-  return {world_from_cell(mx), world_from_cell(my), mx, my, cost, true};
+  return {world_from_cell(mx), world_from_cell(my), mx, my, cost, true, -1.0f};
+}
+
+Step footprint_step(unsigned int mx, unsigned int my, float cost, float footprint_cost)
+{
+  return {world_from_cell(mx), world_from_cell(my), mx, my, cost, true, footprint_cost};
 }
 
 Step world_step(float x, float y)
 {
-  return {x, y, 0u, 0u, kNoInformation, false};
+  return {x, y, 0u, 0u, kNoInformation, false, -1.0f};
 }
 
 struct Case
@@ -110,6 +120,8 @@ struct Case
   bool preseed_collision{false};
   bool consider_footprint{false};
   int time_steps{1};
+  // Cells painted before the trajectory cells, such as a lethal ring
+  std::vector<Step> background;
   // traj[trajectory][time]
   std::vector<std::vector<Step>> traj;
   // Expected per-trajectory collision, and the expected fail flag
@@ -123,11 +135,14 @@ float dist_center(float cell, float scale, float inscribed)
   return (scale * inscribed - std::log(cell) + std::log(253.0f)) / scale - inscribed;
 }
 
-// Collision rule for center costs with the circular robot
-bool collides(float cost, bool track_unknown)
+// Collision rule for the cost the critic scores, circular robot unless consider_footprint
+bool collides(float cost, bool track_unknown, bool consider_footprint = false)
 {
-  if (cost == kLethal || cost == kInscribed) {
+  if (cost == kLethal) {
     return true;
+  }
+  if (cost == kInscribed) {
+    return !consider_footprint;
   }
   if (cost == kNoInformation) {
     return !track_unknown;
@@ -137,7 +152,7 @@ bool collides(float cost, bool track_unknown)
 
 void read_inflation(
   std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros, Inflation & out,
-  bool default_radius)
+  bool default_radius, bool footprint = false)
 {
   auto layer = nav2_costmap_2d::InflationLayerInterface::getInflationLayer(costmap_ros);
   ASSERT_NE(layer, nullptr);
@@ -149,6 +164,16 @@ void read_inflation(
   // A declared polygon footprint replaces that radius; the distance formula still uses it.
   if (default_radius) {
     ASSERT_NEAR(inscribed, 0.1, 0.01);
+  }
+  if (footprint) {
+    // The declared square has half side 0.2
+    ASSERT_NEAR(inscribed, 0.2, 0.01);
+    const double circum = costmap_ros->getLayeredCostmap()->getCircumscribedRadius();
+    const double resolution = costmap_ros->getCostmap()->getResolution();
+    out.circumscribed_cost = static_cast<float>(layer->computeCost(circum / resolution));
+    // Center cost 50 stays below the circumscribed cost, 200 reaches the footprint check
+    ASSERT_LT(50.0f, out.circumscribed_cost);
+    ASSERT_GE(200.0f, out.circumscribed_cost);
   }
   out.scale = static_cast<float>(layer->getCostScalingFactor());
   out.radius = static_cast<float>(layer->getInflationRadius());
@@ -180,6 +205,9 @@ void score_case(
     costmap_ros->declare_parameter("plugins", std::vector<std::string>{});
   }
   if (c.consider_footprint) {
+    // The costmap pads a declared footprint by 0.01 by default, which puts the inscribed
+    // radius of this square at 0.21, just outside the 0.2 +/- 0.01 check. Pad by nothing.
+    costmap_ros->declare_parameter("footprint_padding", rclcpp::ParameterValue(0.0));
     costmap_ros->declare_parameter(
       "footprint",
       std::string("[[0.2, 0.2], [0.2, -0.2], [-0.2, -0.2], [-0.2, 0.2]]"));
@@ -212,7 +240,8 @@ void score_case(
   costmap_ros->on_configure(lstate);
 
   if (c.inflation && inflation != nullptr) {
-    ASSERT_NO_FATAL_FAILURE(read_inflation(costmap_ros, *inflation, !c.consider_footprint));
+    ASSERT_NO_FATAL_FAILURE(read_inflation(
+        costmap_ros, *inflation, !c.consider_footprint, c.consider_footprint));
   }
 
   // Zero the master grid, then paint the scenario
@@ -221,6 +250,9 @@ void score_case(
     for (unsigned int mx = 0; mx < costmap->getSizeInCellsX(); ++mx) {
       costmap->setCost(mx, my, 0);
     }
+  }
+  for (const auto & step : c.background) {
+    costmap->setCost(step.mx, step.my, static_cast<unsigned char>(step.cost));
   }
   for (const auto & row : c.traj) {
     for (const auto & step : row) {
@@ -303,11 +335,17 @@ void expect_classical(const Case & c)
     bool collided = false;
     float margin = 0.0f;
     for (int t = 0; t < c.time_steps; ++t) {
-      const float cost = c.traj[i][t].cost;
+      float cost = c.traj[i][t].cost;
+      // A footprint pose whose center cost reaches the circumscribed cost is scored on the
+      // footprint cost, which each footprint step declares by hand
+      if (c.consider_footprint && c.traj[i][t].footprint_cost >= 0.0f) {
+        ASSERT_GE(cost, inflation.circumscribed_cost) << "trajectory " << i;
+        cost = c.traj[i][t].footprint_cost;
+      }
       if (cost < 1.0f) {
         continue;
       }
-      if (collides(cost, c.track_unknown)) {
+      if (collides(cost, c.track_unknown, c.consider_footprint)) {
         collided = true;
         break;
       }
@@ -478,6 +516,81 @@ Case OffMapFootprintTracked_case()
   c.time_steps = 1;
   c.traj = {{world_step(-1.0f, 1.0f)}};
   c.collided = {false};
+  c.fail = false;
+  return c;
+}
+
+// Footprint mode, square footprint with half side 0.2. The lethal ring surrounds cell (10, 10)
+// at two cells from its center; cell (10, 10) is the center of the pose under test.
+std::vector<Step> lethal_ring()
+{
+  std::vector<Step> ring;
+  for (unsigned int k = 8; k <= 12; ++k) {
+    ring.push_back(cell_step(8, k, kLethal));
+    ring.push_back(cell_step(12, k, kLethal));
+    if (k != 8 && k != 12) {
+      ring.push_back(cell_step(k, 8, kLethal));
+      ring.push_back(cell_step(k, 12, kLethal));
+    }
+  }
+  return ring;
+}
+
+Case footprint_case()
+{
+  Case c;
+  c.consider_footprint = true;
+  c.time_steps = 1;
+  return c;
+}
+
+Case FreeCenterSkipsFootprint_case()
+{
+  Case c = footprint_case();
+  c.background = lethal_ring();
+  c.traj = {{cell_step(10, 10, 0.0f)}};
+  c.collided = {false};
+  c.fail = false;
+  return c;
+}
+
+Case FootprintHit_case()
+{
+  Case c = footprint_case();
+  c.background = lethal_ring();
+  c.traj = {{footprint_step(10, 10, 200.0f, kLethal)}};
+  c.collided = {true};
+  c.fail = true;
+  return c;
+}
+
+Case FootprintClearReplacesCenter_case()
+{
+  Case c = footprint_case();
+  c.traj = {{footprint_step(10, 10, 200.0f, 0.0f)}, {cell_step(30, 30, 0.0f)}};
+  c.collided = {false, false};
+  c.fail = false;
+  return c;
+}
+
+Case InscribedCenterFootprintClear_case()
+{
+  Case c = footprint_case();
+  c.traj = {{footprint_step(10, 10, kInscribed, 0.0f)}};
+  c.collided = {false};
+  c.fail = false;
+  return c;
+}
+
+Case FootprintKeepsEarlierRepulsion_case()
+{
+  Case c = footprint_case();
+  c.time_steps = 2;
+  c.background = lethal_ring();
+  c.traj = {
+    {cell_step(20, 10, 50.0f), footprint_step(10, 10, 200.0f, kLethal)},
+    {cell_step(30, 30, 0.0f), cell_step(31, 30, 0.0f)}};
+  c.collided = {true, false};
   c.fail = false;
   return c;
 }
@@ -662,6 +775,31 @@ TEST(ObstaclesCriticParity, OffMapFootprintTracked)
   expect_classical(OffMapFootprintTracked_case());
 }
 
+TEST(ObstaclesCriticParity, FreeCenterSkipsFootprint)
+{
+  expect_classical(FreeCenterSkipsFootprint_case());
+}
+
+TEST(ObstaclesCriticParity, FootprintHit)
+{
+  expect_classical(FootprintHit_case());
+}
+
+TEST(ObstaclesCriticParity, FootprintClearReplacesCenter)
+{
+  expect_classical(FootprintClearReplacesCenter_case());
+}
+
+TEST(ObstaclesCriticParity, InscribedCenterFootprintClear)
+{
+  expect_classical(InscribedCenterFootprintClear_case());
+}
+
+TEST(ObstaclesCriticParity, FootprintKeepsEarlierRepulsion)
+{
+  expect_classical(FootprintKeepsEarlierRepulsion_case());
+}
+
 TEST(ObstaclesCriticParity, NoInflationFree)
 {
   expect_classical(NoInflationFree_case());
@@ -815,6 +953,31 @@ TEST(ObstaclesCriticParity, CudaOutOfMapHigh)
 TEST(ObstaclesCriticParity, CudaOffMapFootprintTracked)
 {
   expect_cuda_matches_classical(OffMapFootprintTracked_case());
+}
+
+TEST(ObstaclesCriticParity, CudaFreeCenterSkipsFootprint)
+{
+  expect_cuda_matches_classical(FreeCenterSkipsFootprint_case());
+}
+
+TEST(ObstaclesCriticParity, CudaFootprintHit)
+{
+  expect_cuda_matches_classical(FootprintHit_case());
+}
+
+TEST(ObstaclesCriticParity, CudaFootprintClearReplacesCenter)
+{
+  expect_cuda_matches_classical(FootprintClearReplacesCenter_case());
+}
+
+TEST(ObstaclesCriticParity, CudaInscribedCenterFootprintClear)
+{
+  expect_cuda_matches_classical(InscribedCenterFootprintClear_case());
+}
+
+TEST(ObstaclesCriticParity, CudaFootprintKeepsEarlierRepulsion)
+{
+  expect_cuda_matches_classical(FootprintKeepsEarlierRepulsion_case());
 }
 
 TEST(ObstaclesCriticParity, CudaNoInflationFree)
