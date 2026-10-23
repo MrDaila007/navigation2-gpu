@@ -56,3 +56,16 @@ target_link_libraries(cost_critic_parity_test
 if(${TEST_DEBUG_INFO})
   target_compile_definitions(cost_critic_parity_test PUBLIC -DTEST_DEBUG_INFO)
 endif()
+
+# ObstaclesCritic classical scoring lock, also links against the critics library
+nav2_add_gtest(obstacles_critic_parity_test obstacles_critic_parity_test.cpp)
+target_link_libraries(obstacles_critic_parity_test
+  mppi_controller
+  mppi_critics
+  rclcpp::rclcpp
+  rclcpp_lifecycle::rclcpp_lifecycle
+  nav2_costmap_2d::nav2_costmap_2d_core
+)
+if(${TEST_DEBUG_INFO})
+  target_compile_definitions(obstacles_critic_parity_test PUBLIC -DTEST_DEBUG_INFO)
+endif()
