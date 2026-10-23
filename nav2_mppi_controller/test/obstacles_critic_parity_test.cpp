@@ -108,6 +108,7 @@ struct Case
   bool track_collisions{true};
   bool initial_fail{false};
   bool preseed_collision{false};
+  bool consider_footprint{false};
   int time_steps{1};
   // traj[trajectory][time]
   std::vector<std::vector<Step>> traj;
@@ -134,7 +135,9 @@ bool collides(float cost, bool track_unknown)
   return false;
 }
 
-void read_inflation(std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros, Inflation & out)
+void read_inflation(
+  std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros, Inflation & out,
+  bool default_radius)
 {
   auto layer = nav2_costmap_2d::InflationLayerInterface::getInflationLayer(costmap_ros);
   ASSERT_NE(layer, nullptr);
@@ -143,7 +146,10 @@ void read_inflation(std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros, 
   const double inscribed = costmap_ros->getLayeredCostmap()->getInscribedRadius();
   // The circular robot is a padded polygon in the layered costmap, so the inscribed radius
   // is near 0.1 but not exactly 0.1. The critic reads this same value, so use it as read.
-  ASSERT_NEAR(inscribed, 0.1, 0.01);
+  // A declared polygon footprint replaces that radius; the distance formula still uses it.
+  if (default_radius) {
+    ASSERT_NEAR(inscribed, 0.1, 0.01);
+  }
   out.scale = static_cast<float>(layer->getCostScalingFactor());
   out.radius = static_cast<float>(layer->getInflationRadius());
   out.inscribed = static_cast<float>(inscribed);
@@ -173,9 +179,14 @@ void score_case(
   if (!c.inflation) {
     costmap_ros->declare_parameter("plugins", std::vector<std::string>{});
   }
+  if (c.consider_footprint) {
+    costmap_ros->declare_parameter(
+      "footprint",
+      std::string("[[0.2, 0.2], [0.2, -0.2], [-0.2, -0.2], [-0.2, 0.2]]"));
+  }
 
   // Critic parameters, declared with the same C++ types as ObstaclesCritic::initialize
-  bool consider_footprint = false;
+  bool consider_footprint = c.consider_footprint;
   int power = c.power;
   float repulsion_weight = kRepulsionWeight;
   float critical_weight = kCriticalWeight;
@@ -186,7 +197,7 @@ void score_case(
   bool use_cuda = use_cuda_flag;
   {
     auto getParam = param_handler.getParamGetter(critic_name);
-    getParam(consider_footprint, "consider_footprint", false);
+    getParam(consider_footprint, "consider_footprint", c.consider_footprint);
     getParam(power, "cost_power", c.power);
     getParam(repulsion_weight, "repulsion_weight", kRepulsionWeight);
     getParam(critical_weight, "critical_weight", kCriticalWeight);
@@ -201,7 +212,7 @@ void score_case(
   costmap_ros->on_configure(lstate);
 
   if (c.inflation && inflation != nullptr) {
-    ASSERT_NO_FATAL_FAILURE(read_inflation(costmap_ros, *inflation));
+    ASSERT_NO_FATAL_FAILURE(read_inflation(costmap_ros, *inflation, !c.consider_footprint));
   }
 
   // Zero the master grid, then paint the scenario
@@ -457,6 +468,20 @@ Case OutOfMapHigh_case()
   return c;
 }
 
+// Off the map, with a footprint and unknown space tracked. The center stays 255 and is not a
+// collision, so the distance term uses that cost rather than a lethal footprint cost.
+Case OffMapFootprintTracked_case()
+{
+  Case c;
+  c.consider_footprint = true;
+  c.track_unknown = true;
+  c.time_steps = 1;
+  c.traj = {{world_step(-1.0f, 1.0f)}};
+  c.collided = {false};
+  c.fail = false;
+  return c;
+}
+
 Case NoInflationFree_case()
 {
   Case c = single_case(100.0f, false);
@@ -632,6 +657,11 @@ TEST(ObstaclesCriticParity, OutOfMapHigh)
   expect_classical(OutOfMapHigh_case());
 }
 
+TEST(ObstaclesCriticParity, OffMapFootprintTracked)
+{
+  expect_classical(OffMapFootprintTracked_case());
+}
+
 TEST(ObstaclesCriticParity, NoInflationFree)
 {
   expect_classical(NoInflationFree_case());
@@ -780,6 +810,11 @@ TEST(ObstaclesCriticParity, CudaOutOfMapLow)
 TEST(ObstaclesCriticParity, CudaOutOfMapHigh)
 {
   expect_cuda_matches_classical(OutOfMapHigh_case());
+}
+
+TEST(ObstaclesCriticParity, CudaOffMapFootprintTracked)
+{
+  expect_cuda_matches_classical(OffMapFootprintTracked_case());
 }
 
 TEST(ObstaclesCriticParity, CudaNoInflationFree)

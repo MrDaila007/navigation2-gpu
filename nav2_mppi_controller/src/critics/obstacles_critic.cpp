@@ -302,6 +302,15 @@ CollisionCost ObstaclesCritic::costAtPose(
     cost = collision_checker_.pointCost(x_i, y_i);
   } else {
     cost = *center_cost;
+    // 255 is also what an off-map pose reads as. worldToMap is bounds arithmetic and does
+    // not read a cell. Off the map, return before the footprint check, as the null path does.
+    // An in-map unknown cell stays 255 and still reaches that check.
+    if (cost == static_cast<float>(nav2_costmap_2d::NO_INFORMATION)) {
+      unsigned int x_i, y_i;
+      if (!collision_checker_.worldToMap(x, y, x_i, y_i)) {
+        return collision_cost;
+      }
+    }
   }
 
   if (consider_footprint_ &&
