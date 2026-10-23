@@ -536,15 +536,6 @@ Case DisabledCritic_case()
   return c;
 }
 
-Case EmptyBatch_case()
-{
-  Case c;
-  c.time_steps = 1;
-  c.initial_fail = false;
-  c.fail = true;
-  return c;
-}
-
 }  // namespace
 
 TEST(ObstaclesCriticParity, FreeSpace)
@@ -655,13 +646,4 @@ TEST(ObstaclesCriticParity, PreseededFlagStays)
 TEST(ObstaclesCriticParity, DisabledCritic)
 {
   expect_classical(DisabledCritic_case());
-}
-
-// Disabled: ObstaclesCritic::score() reads repulsive_cost.minCoeff() on an empty array, which
-// dereferences a null pointer and crashes the process when Eigen asserts are compiled out.
-// An empty batch cannot be scored on the CPU path today, so there is nothing to lock.
-// Enable this test once score() handles a batch of zero.
-TEST(ObstaclesCriticParity, DISABLED_EmptyBatch)
-{
-  expect_classical(EmptyBatch_case());
 }
