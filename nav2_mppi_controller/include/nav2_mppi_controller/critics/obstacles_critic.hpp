@@ -21,6 +21,7 @@
 #include "nav2_costmap_2d/footprint_collision_checker.hpp"
 #include "nav2_costmap_2d/inflation_layer.hpp"
 #include "nav2_mppi_controller/critic_function.hpp"
+#include "nav2_mppi_controller/critics/obstacles_critic_cuda.hpp"
 #include "nav2_mppi_controller/models/state.hpp"
 #include "nav2_mppi_controller/tools/utils.hpp"
 
@@ -37,6 +38,9 @@ namespace mppi::critics
 class ObstaclesCritic : public CriticFunction
 {
 public:
+  ObstaclesCritic();
+  ~ObstaclesCritic() override;
+
   /**
     * @brief Initialize critic
     */
@@ -50,6 +54,13 @@ public:
   void score(CriticData & data) override;
 
 protected:
+  /**
+   * @brief Score the batch from per-pose center costs
+   * @param data Critic data to score and update
+   * @param gathered Column-major center costs, or null to read each pose with costAtPose
+   */
+  void scoreFromCenters(CriticData & data, const float * gathered);
+
   /**
     * @brief Checks if cost represents a collision
     * @param cost Costmap cost
@@ -98,6 +109,9 @@ protected:
   unsigned int power_{0};
   float repulsion_weight_, critical_weight_{0};
   std::string inflation_layer_name_;
+
+  bool use_cuda_{false};
+  std::unique_ptr<ObstaclesCriticCuda> cuda_scorer_;
 };
 
 }  // namespace mppi::critics

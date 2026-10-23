@@ -647,3 +647,42 @@ TEST(ObstaclesCriticParity, DisabledCritic)
 {
   expect_classical(DisabledCritic_case());
 }
+
+TEST(ObstaclesCriticParity, CudaFlagOffDoesNotLaunch)
+{
+  using namespace mppi::critics;  // NOLINT
+  reset_obstacles_critic_cuda_launch_count();
+  const int before = obstacles_critic_cuda_launch_count();
+  // Score TwoTrajectoryPreference through a critic whose use_cuda parameter is false.
+  expect_classical(TwoTrajectoryPreference_case());
+#if !NAV2_MPPI_HAS_CUDA
+  EXPECT_FALSE(obstacles_critic_cuda_compiled());
+#endif
+  EXPECT_EQ(obstacles_critic_cuda_launch_count(), before);
+}
+
+TEST(ObstaclesCriticParity, CudaFlagOnMatchesCpuWhenDeviceMissing)
+{
+  using namespace mppi::critics;  // NOLINT
+  if (obstacles_critic_cuda_device_available()) {
+    GTEST_SKIP();
+  }
+  reset_obstacles_critic_cuda_launch_count();
+  const int before = obstacles_critic_cuda_launch_count();
+  Eigen::ArrayXf cpu_costs;
+  Eigen::ArrayXf cuda_costs;
+  bool cpu_fail = false;
+  bool cuda_fail = false;
+  std::vector<bool> cpu_hits;
+  std::vector<bool> cuda_hits;
+  score_case(TwoTrajectoryPreference_case(), "cpu_critic", false, cpu_costs, cpu_fail, cpu_hits);
+  score_case(
+    TwoTrajectoryPreference_case(), "cuda_critic", true, cuda_costs, cuda_fail, cuda_hits);
+  ASSERT_EQ(cpu_costs.size(), cuda_costs.size());
+  for (int i = 0; i < cpu_costs.size(); ++i) {
+    EXPECT_EQ(cpu_costs(i), cuda_costs(i));
+  }
+  EXPECT_EQ(cpu_fail, cuda_fail);
+  EXPECT_EQ(cpu_hits, cuda_hits);
+  EXPECT_EQ(obstacles_critic_cuda_launch_count(), before);
+}

@@ -21,6 +21,10 @@
 namespace mppi::critics
 {
 
+ObstaclesCritic::ObstaclesCritic() = default;
+
+ObstaclesCritic::~ObstaclesCritic() = default;
+
 void ObstaclesCritic::initialize()
 {
   auto getParentParam = parameters_handler_->getParamGetter(parent_name_);
@@ -33,6 +37,7 @@ void ObstaclesCritic::initialize()
   getParam(collision_margin_distance_, "collision_margin_distance", 0.10f);
   getParam(near_goal_distance_, "near_goal_distance", 0.5f);
   getParam(inflation_layer_name_, "inflation_layer_name", std::string(""));
+  getParam(use_cuda_, "use_cuda", false);
 
   collision_checker_.setCostmap(costmap_);
   possible_collision_cost_ = findCircumscribedCost(costmap_ros_);
@@ -128,6 +133,27 @@ void ObstaclesCritic::score(CriticData & data)
     possible_collision_cost_ = findCircumscribedCost(costmap_ros_);
   }
 
+  if (use_cuda_) {
+    if (!cuda_scorer_) {
+      cuda_scorer_ = std::make_unique<ObstaclesCriticCuda>();
+    }
+    if (!obstacles_critic_cuda_device_available()) {
+      static bool warned = false;
+      if (!warned) {
+        warned = true;
+        RCLCPP_WARN(
+          logger_,
+          "ObstaclesCritic use_cuda is true but no CUDA device is available. "
+          "Scoring on the CPU instead.");
+      }
+    }
+  }
+
+  scoreFromCenters(data, nullptr);
+}
+
+void ObstaclesCritic::scoreFromCenters(CriticData & data, const float * gathered)
+{
   // If near the goal, don't apply the preferential term since the goal is near obstacles
   bool near_goal = false;
   if (data.state.local_path_length < near_goal_distance_) {
@@ -153,7 +179,12 @@ void ObstaclesCritic::score(CriticData & data)
     repulsive_cost(i) = 0.0f;
 
     for (unsigned int j = 0; j != traj_len; j++) {
-      pose_cost = costAtPose(traj.x(i, j), traj.y(i, j), traj.yaws(i, j));
+      if (gathered != nullptr) {
+        pose_cost.cost = gathered[j * batch_size + i];
+        pose_cost.using_footprint = false;
+      } else {
+        pose_cost = costAtPose(traj.x(i, j), traj.y(i, j), traj.yaws(i, j));
+      }
       if (pose_cost.cost < 1.0f) {continue;}  // In free space
 
       if (inCollision(pose_cost.cost)) {

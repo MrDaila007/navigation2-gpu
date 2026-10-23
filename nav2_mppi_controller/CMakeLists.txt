@@ -134,6 +134,7 @@ add_library(mppi_critics SHARED
   src/critics/goal_angle_critic.cpp
   src/critics/mecanum_critic.cpp
   src/critics/obstacles_critic.cpp
+  src/critics/obstacles_critic_cuda_stub.cpp
   src/critics/omni_constraint_critic.cpp
   src/critics/path_align_critic.cpp
   src/critics/path_angle_critic.cpp
@@ -229,6 +230,7 @@ if(BUILD_TESTING)
   add_subdirectory(benchmark)
   if(NAV2_MPPI_CUDA)
     target_compile_definitions(cost_critic_parity_test PRIVATE NAV2_MPPI_HAS_CUDA=1)
+    target_compile_definitions(obstacles_critic_parity_test PRIVATE NAV2_MPPI_HAS_CUDA=1)
   endif()
 endif()
 
