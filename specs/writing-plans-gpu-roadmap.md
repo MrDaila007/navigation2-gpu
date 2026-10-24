@@ -65,7 +65,7 @@ flowchart LR
 
 ## Этапы и критерии выхода
 
-R0/R1 предстоит начать на desktop RTX 3060. Продуктовые budgets и контролируемый baseline ещё не закрыты. Этапы **PLANNED**, кроме частичной начальной реализации R3, указанной отдельно. Каждый этап завершается source revision + commands + logs + comparison report, а не только наличием `.cu`.
+R0/R1 начаты: [предварительный controller baseline](../tasks/TASK-001/performance-profiler-report.md) получен на доступной RTX 3060. Продуктовые budgets, полноценный профиль Nav2 и readiness ещё не закрыты; M0 не завершён. Остальные этапы **PLANNED**, кроме частичной начальной реализации R3, указанной отдельно. Каждый этап завершается source revision + commands + logs + comparison report, а не только наличием `.cu`.
 
 | ID / этап | Порядок / зависимость | Проверяемый результат |
 |---|---|---|

@@ -124,3 +124,8 @@ CPU build: отдельные build/install/log, `-DNAV2_MPPI_CUDA=OFF`. Пре�
 | Host/toolchain/GPU | PASS: uname -sm; g++ --version; nvcc --version; nvidia-smi --query-gpu=name,driver_version --format=csv,noheader вне sandbox |
 | Сделанное/оставшееся | PASS: implementation matrix, historical logs, unknowns и proposed roadmap выше |
 | Новые build/test/target checks | NOT RUN: анализ документации/source/logs; implementation не менялась |
+
+
+## Subsequent profiling evidence
+
+2026-10-23: добавлен measurement-only harness на ветке perf/gpu-baseline. Свежие результаты, точные commands и открытые проверки — [performance report](../tasks/TASK-001/performance-profiler-report.md); среда — [performance-profiler-environment.md](performance-profiler-environment.md). Исторические результаты выше не подменяют этот отчёт.

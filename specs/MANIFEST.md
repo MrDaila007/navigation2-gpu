@@ -10,6 +10,7 @@
 |---|---|---|---|---|
 | [repository-doc-context.md](repository-doc-context.md) | GPU status, topology, build/test evidence, unknowns, roadmap input | source/branches/worktree logs; отдельный profile отсутствует | 2026-10-23 | main 94bace6f; GPU 9557655b |
 | [writing-plans-gpu-roadmap.md](writing-plans-gpu-roadmap.md) | Глобальные этапы максимального переноса вычислений на GPU, зависимости и exit gates | repository context, source inspection, human decisions | 2026-10-23 | 9557655b |
+| [performance-profiler-environment.md](performance-profiler-environment.md) | Проверенная среда и measurement contract текущего desktop baseline | source, container inventory, human decisions | 2026-10-23 | 9557655b + measurement harness |
 
 ## Existing GPU implementation sources
 
@@ -23,3 +24,7 @@
 - ROS/workload и latency/resource budgets; модель desktop GPU уточнена: RTX 3060.
 - Speedup полного control loop и system verification на выбранном target.
 - Отдельный project profile пока не создан.
+
+## Current measurement evidence
+
+- [Desktop MPPI baseline report](../tasks/TASK-001/performance-profiler-report.md): source 9557655b + measurement-only changes, branch perf/gpu-baseline, 2026-10-23. Exploratory RTX 3060 evidence; controlled performance acceptance and full package readiness not confirmed.

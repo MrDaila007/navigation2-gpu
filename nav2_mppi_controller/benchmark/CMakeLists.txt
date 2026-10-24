@@ -3,6 +3,7 @@ find_package(benchmark REQUIRED)
 set(BENCHMARK_NAMES
   optimizer_benchmark
   controller_benchmark
+  mppi_gpu_baseline
 )
 
 foreach(name IN LISTS BENCHMARK_NAMES)
