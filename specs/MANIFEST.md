@@ -1,0 +1,25 @@
+# Project: Navigation2 — optional NVIDIA GPU support
+
+[VERIFIED] ROS 2 Navigation2. CUDA-работа касается CostCritic/ObstaclesCritic внутри MPPI и находится в feature branches.
+
+[VERIFIED — human clarification, 2026-10-24] Текущий target — desktop NVIDIA RTX 3060. Jetson — будущая адаптация; конкретная модель пока не выбрана.
+
+## Specs Index
+
+| File | Purpose | Depends On | Last Updated | Verified Revision |
+|---|---|---|---|---|
+| [repository-doc-context.md](repository-doc-context.md) | GPU status, topology, build/test evidence, unknowns, roadmap input | source/branches/worktree logs; отдельный profile отсутствует | 2026-10-23 | main 94bace6f; GPU 9557655b |
+| [writing-plans-gpu-roadmap.md](writing-plans-gpu-roadmap.md) | Глобальные этапы максимального переноса вычислений на GPU, зависимости и exit gates | repository context, source inspection, human decisions | 2026-10-23 | 9557655b |
+
+## Existing GPU implementation sources
+
+- [CostCritic CUDA implementation](../nav2_mppi_controller/src/critics/cost_critic_cuda.cu)
+- [ObstaclesCritic CUDA implementation](../nav2_mppi_controller/src/critics/obstacles_critic_cuda.cu)
+
+Исторические notes в локальном docs/superpowers/ не входят в опубликованное дерево. Источник текущего поведения — код; единый план — writing-plans-gpu-roadmap.md.
+
+## Known Unknowns
+
+- ROS/workload и latency/resource budgets; модель desktop GPU уточнена: RTX 3060.
+- Speedup полного control loop и system verification на выбранном target.
+- Отдельный project profile пока не создан.
