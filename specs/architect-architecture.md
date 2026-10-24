@@ -4,6 +4,7 @@
 **Source baseline:** 9557655b + незакоммиченные baseline/TASK-002 fixes; проверенные факты среды и результатов — [environment](performance-profiler-environment.md), [baseline](../tasks/TASK-001/performance-profiler-report.md), [correctness fixes](../tasks/TASK-002/systematic-debugger-report.md).
 **Target:** desktop RTX 3060. Jetson — отдельный будущий этап.
 **Task:** [TASK-003](../tasks/TASK-003/STATE.md).
+**Контракт v1:** [interface-designer-contracts.md](interface-designer-contracts.md), exact limits/status/seam/migration; этот файл задаёт архитектурное направление. Все решения ниже [PROPOSED], кроме явно отмеченных source facts / human decisions.
 
 ## 1. Контекст, цель и границы
 
