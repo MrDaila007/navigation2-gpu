@@ -11,6 +11,7 @@
 | [repository-doc-context.md](repository-doc-context.md) | GPU status, topology, build/test evidence, unknowns, roadmap input | source/branches/worktree logs; отдельный profile отсутствует | 2026-10-23 | main 94bace6f; GPU 9557655b |
 | [writing-plans-gpu-roadmap.md](writing-plans-gpu-roadmap.md) | Глобальные этапы максимального переноса вычислений на GPU, зависимости и exit gates | repository context, source inspection, human decisions | 2026-10-23 | 9557655b |
 | [performance-profiler-environment.md](performance-profiler-environment.md) | Проверенная среда и measurement contract текущего desktop baseline | source, container inventory, human decisions | 2026-10-23 | 9557655b + measurement harness |
+| [architect-architecture.md](architect-architecture.md) | R2: shared GPU context, ownership/epochs, plugin seam, errors, resource accounting and acceptance | baseline, TASK-002 fixes, source inspection | 2026-10-24 | 9557655b + unchanged working source |
 
 ## Existing GPU implementation sources
 

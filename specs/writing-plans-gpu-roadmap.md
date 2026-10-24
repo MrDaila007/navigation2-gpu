@@ -2,7 +2,7 @@
 
 **Дата:** 2026-10-23. **Baseline:** `9557655b38a839b7c14e0aff862f63332f7ec7e4`.
 **Статус:** план разработки; перенос следующих компонентов ещё не реализован.
-**Уточнение 2026-10-24:** desktop RTX 3060; архитектура R2 предстоит отдельным этапом.
+**Уточнение 2026-10-24:** desktop RTX 3060; архитектура R2 — [architect-architecture.md](architect-architecture.md).
 **Target:** desktop RTX 3060 — решение пользователя. Jetson — будущий отдельный этап.
 **Общая ветка:** `feat/gpu-adaptation`; каждая реализация — отдельная ветка от неё, интеграция после проверок согласно [AGENTS.md](../AGENTS.md).
 **План исполнения:** [TASK-001](../tasks/TASK-001/writing-plans-plan.md).
@@ -96,7 +96,7 @@ Speedup = CPU full-cycle wall time / GPU full-cycle wall time; отдельно 
 
 ### R2: перенос данных как часть вычислений
 
-Архитектуру общего GPU owner и границы phase scope предстоит определить перед реализацией R2.
+Архитектурные решения, seam без изменения CriticData и границы phase scope — [architect-architecture.md](architect-architecture.md).
 
 Сначала обеспечить единую загрузку x/y/map для двух существующих critics; затем подключать новые producers/consumers. Выбор full-copy против dirty ROI и pinned memory/overlap принимается по measurement. Dirty tracking требует version/invalidation при resize/origin/clear/static update. На steady state после warmup не должно быть allocation, если shape не изменился; при growth/reset release paths проверяются отдельно.
 
