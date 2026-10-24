@@ -70,6 +70,7 @@ TEST(CriticTests, ConstraintsCritic)
   costmap_ros->on_configure(lstate);
 
   models::State state;
+  state.local_path_length = 0.0f;
   // provide velocities in constraints, should not have any costs
   state.vx = 0.40 * Eigen::ArrayXXf::Ones(1000, 30);
   state.vy = Eigen::ArrayXXf::Zero(1000, 30);
@@ -217,6 +218,7 @@ TEST(CriticTests, OmniConstraintCritic)
   costmap_ros->on_configure(lstate);
 
   models::State state;
+  state.local_path_length = 0.0f;
   state.vx = Eigen::ArrayXXf::Zero(1000, 30);
   state.vy = Eigen::ArrayXXf::Zero(1000, 30);
   state.wz = Eigen::ArrayXXf::Zero(1000, 30);
@@ -326,6 +328,7 @@ TEST(CriticTests, MecanumCritic)
   costmap_ros->on_configure(lstate);
 
   models::State state;
+  state.local_path_length = 0.0f;
   state.vx = Eigen::ArrayXXf::Zero(1000, 30);
   state.vy = Eigen::ArrayXXf::Zero(1000, 30);
   state.wz = Eigen::ArrayXXf::Zero(1000, 30);
@@ -580,6 +583,7 @@ TEST(CriticTests, GoalAngleCritic)
   costmap_ros->on_configure(lstate);
 
   models::State state;
+  state.local_path_length = 0.0f;
   models::ControlSequence control_sequence;
   models::Trajectories generated_trajectories;
   generated_trajectories.reset(1000, 30);
@@ -642,6 +646,7 @@ TEST(CriticTests, GoalAngleCriticSymmetric)
   costmap_ros->on_configure(lstate);
 
   models::State state;
+  state.local_path_length = 0.0f;
   models::ControlSequence control_sequence;
   models::Trajectories generated_trajectories;
   generated_trajectories.reset(1000, 30);
@@ -703,6 +708,7 @@ TEST(CriticTests, GoalCritic)
   costmap_ros->on_configure(lstate);
 
   models::State state;
+  state.local_path_length = 0.0f;
   models::ControlSequence control_sequence;
   models::Trajectories generated_trajectories;
   generated_trajectories.reset(1000, 30);
@@ -758,6 +764,7 @@ TEST(CriticTests, PathAngleCritic)
   costmap_ros->on_configure(lstate);
 
   models::State state;
+  state.local_path_length = 0.0f;
   state.reset(1000, 30);
   models::ControlSequence control_sequence;
   models::Trajectories generated_trajectories;
@@ -879,6 +886,7 @@ TEST(CriticTests, PreferForwardCritic)
   costmap_ros->on_configure(lstate);
 
   models::State state;
+  state.local_path_length = 0.0f;
   state.reset(1000, 30);
   models::ControlSequence control_sequence;
   models::Trajectories generated_trajectories;
@@ -938,6 +946,7 @@ TEST(CriticTests, TwirlingCritic)
   costmap_ros->on_configure(lstate);
 
   models::State state;
+  state.local_path_length = 0.0f;
   state.reset(1000, 30);
   models::ControlSequence control_sequence;
   models::Trajectories generated_trajectories;
@@ -1005,6 +1014,7 @@ TEST(CriticTests, PathFollowCritic)
   costmap_ros->on_configure(lstate);
 
   models::State state;
+  state.local_path_length = 0.0f;
   state.reset(1000, 30);
   models::ControlSequence control_sequence;
   models::Trajectories generated_trajectories;
@@ -1059,6 +1069,7 @@ TEST(CriticTests, PathAlignCritic)
   costmap_ros->on_configure(lstate);
 
   models::State state;
+  state.local_path_length = 0.0f;
   state.reset(1000, 30);
   models::ControlSequence control_sequence;
   models::Trajectories generated_trajectories;
@@ -1178,6 +1189,7 @@ TEST(CriticTests, VelocityDeadbandCritic)
   costmap_ros->on_configure(lstate);
 
   models::State state;
+  state.local_path_length = 0.0f;
   state.reset(1000, 30);
   models::ControlSequence control_sequence;
   models::Trajectories generated_trajectories;

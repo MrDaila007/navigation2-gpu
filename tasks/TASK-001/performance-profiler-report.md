@@ -1,6 +1,7 @@
 # Desktop MPPI GPU baseline report
 
 **Hardware clarification (2026-10-24):** desktop target и baseline — RTX 3060; численные результаты и сохранённые raw artifacts не изменялись.
+**Correctness follow-up:** прежние cppcheck/teardown findings закрыты в [TASK-002](../TASK-002/systematic-debugger-report.md); историческая таблица проверок ниже сохранена для исходного baseline.
 **Date:** 2026-10-23. **Branch:** perf/gpu-baseline, от feat/gpu-adaptation.
 **Source:** 9557655b38a839b7c14e0aff862f63332f7ec7e4 + measurement-only benchmark source/CMake changes; source hashes in [evidence](performance-profiler-artifacts/source-hashes.txt).
 **Status:** exploratory controller baseline completed; R0/R1 remain partial, DoD readiness blocked by existing cppcheck failures and missing target/tool evidence.

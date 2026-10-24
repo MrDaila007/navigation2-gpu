@@ -108,6 +108,7 @@ TEST(CriticManagerTests, BasicCriticOperations)
 
   // Evaluation of critics should score them, but only if failure flag is not set
   models::State state;
+  state.local_path_length = 0.0f;
   models::ControlSequence control_sequence;
   models::Trajectories generated_trajectories;
   models::Path path;

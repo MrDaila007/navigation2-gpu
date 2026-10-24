@@ -14,6 +14,8 @@
 
 #include <chrono>
 #include <cmath>
+#include <memory>
+#include <string>
 #include <thread>
 
 #include "gtest/gtest.h"
@@ -91,6 +93,17 @@ public:
       SUCCEED();
     }
     EXPECT_EQ(motion_model_.get(), nullptr);
+  }
+
+  std::weak_ptr<MotionModel> retainMotionModelForCritics()
+  {
+    critics_data_.motion_model = motion_model_;
+    return motion_model_;
+  }
+
+  void reloadDiffDriveModel()
+  {
+    setMotionModel("diff_drive");
   }
 
   void resetMotionModel()
@@ -265,6 +278,52 @@ public:
     return integrateStateVelocities(traj, state);
   }
 };
+
+void expectSafeMotionModelLifetime(bool reload)
+{
+  auto node = std::make_shared<nav2::LifecycleNode>("optimizer_lifetime_node");
+  node->declare_parameter("mppic.batch_size", 8);
+  node->declare_parameter("mppic.time_steps", 8);
+  node->declare_parameter("controller_frequency", 30.0);
+  node->declare_parameter(
+    "mppic.diff_drive.plugin", std::string("mppi::DiffDriveMotionModel"));
+  auto costmap_ros = std::make_shared<nav2_costmap_2d::Costmap2DROS>(
+    "optimizer_lifetime_costmap", "", true);
+  ASSERT_EQ(costmap_ros->configure().label(), "inactive");
+  std::string name = "test";
+  ParametersHandler param_handler(node, name);
+  auto tf_buffer = nav2::create_transform_buffer(node);
+  auto optimizer = std::make_unique<OptimizerTester>();
+  optimizer->initialize(node, "mppic", costmap_ros, tf_buffer, &param_handler);
+  const auto model = optimizer->retainMotionModelForCritics();
+  ASSERT_FALSE(model.expired());
+
+  // The real plugin loader reports an unsafe unload through stderr. Capture only
+  // optimizer destruction, keeping costmap/node teardown out of this assertion.
+  testing::internal::CaptureStderr();
+  if (reload) {
+    EXPECT_NO_THROW(optimizer->reloadDiffDriveModel());
+    EXPECT_FALSE(model.expired());  // CriticData still owns the previous model.
+  }
+  optimizer.reset();
+  const auto diagnostics = testing::internal::GetCapturedStderr();
+  EXPECT_TRUE(model.expired());
+  EXPECT_EQ(diagnostics.find("Attempting to unload library"), std::string::npos) << diagnostics;
+
+  EXPECT_EQ(costmap_ros->cleanup().label(), "unconfigured");
+  EXPECT_EQ(costmap_ros->shutdown().label(), "finalized");
+  EXPECT_EQ(node->shutdown().label(), "finalized");
+}
+
+TEST(OptimizerTests, MotionModelLoaderOutlivesInstances)
+{
+  expectSafeMotionModelLifetime(false);
+}
+
+TEST(OptimizerTests, MotionModelLoaderOutlivesReplacedInstances)
+{
+  expectSafeMotionModelLifetime(true);
+}
 
 TEST(OptimizerTests, DefaultInvalidInitialSize)
 {

@@ -28,3 +28,7 @@
 ## Current measurement evidence
 
 - [Desktop MPPI baseline report](../tasks/TASK-001/performance-profiler-report.md): source 9557655b + measurement-only changes, branch perf/gpu-baseline, 2026-10-23. Exploratory RTX 3060 evidence; controlled performance acceptance and full package readiness not confirmed.
+
+## Correctness follow-up
+
+- [Baseline correctness fixes](../tasks/TASK-002/systematic-debugger-report.md), 2026-10-23, branch fix/mppi-baseline-checks, source 9557655b + source-hashed fixes: CPU/CUDA 18/18 with actual cppcheck; focused ASan/UBSan/leak checks PASS. Controlled target performance and full lifecycle scope remain separate gates.

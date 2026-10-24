@@ -302,13 +302,14 @@ protected:
   std::string name_;
   nav2::TransformBuffer::SharedPtr tf_buffer_;
 
+  // Declared before its plugin instances so it is destroyed after them.
+  std::unique_ptr<pluginlib::ClassLoader<MotionModel>> motion_model_loader_;
   std::shared_ptr<MotionModel> motion_model_;
 
   ParametersHandler * parameters_handler_;
   CriticManager critic_manager_;
   NoiseGenerator noise_generator_;
 
-  std::unique_ptr<pluginlib::ClassLoader<MotionModel>> motion_model_loader_;
   std::unique_ptr<pluginlib::ClassLoader<OptimalTrajectoryValidator>> validator_loader_;
   OptimalTrajectoryValidator::Ptr trajectory_validator_;
 

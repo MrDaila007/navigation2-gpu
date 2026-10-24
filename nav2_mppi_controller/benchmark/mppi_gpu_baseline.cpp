@@ -68,6 +68,28 @@ struct ControllerCleanup
   }
 };
 
+struct FixtureCleanup
+{
+  nav2::LifecycleNode::SharedPtr node;
+  std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap;
+  ~FixtureCleanup()
+  {
+    const auto state = costmap->get_current_state();
+    if (state.label() == "inactive") {
+      costmap->cleanup();
+    } else if (state.label() == "unconfigured") {
+      // Release any partial initialization if configure did not complete.
+      costmap->on_cleanup(state);
+    }
+    if (costmap->get_current_state().label() != "finalized") {
+      costmap->shutdown();
+    }
+    if (node->get_current_state().label() != "finalized") {
+      node->shutdown();
+    }
+  }
+};
+
 Result measure(
   bool cuda, const std::string & critic, bool footprint,
   const std::string & scene, int samples)
@@ -92,7 +114,9 @@ Result measure(
   TestCostmapSettings map_settings;
   auto costmap_ros = std::make_shared<nav2_costmap_2d::Costmap2DROS>(
     "baseline_costmap", "", true);
-  // The footprint parameter must precede on_configure: setting just the polygon
+  // Declared before the controller so plugins die before their map and node.
+  FixtureCleanup fixture_cleanup{node, costmap_ros};
+  // The footprint parameter must precede configure: setting just the polygon
   // afterward does not clear getUseRadius(), and CostCritic rejects that mismatch.
   costmap_ros->declare_parameter("footprint_padding", 0.0);
   costmap_ros->declare_parameter("global_frame", std::string("odom"));
@@ -103,7 +127,7 @@ Result measure(
   } else {
     costmap_ros->declare_parameter("robot_radius", map_settings.footprint_size);
   }
-  if (costmap_ros->on_configure(rclcpp_lifecycle::State{}) != nav2::CallbackReturn::SUCCESS) {
+  if (costmap_ros->configure().label() != "inactive") {
     throw std::runtime_error("costmap configuration failed");
   }
   auto * costmap = costmap_ros->getCostmap();

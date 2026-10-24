@@ -718,9 +718,13 @@ void Optimizer::setMotionModel(const std::string & motion_model_name)
   auto node = parent_.lock();
   const std::string plugin_ns = name_ + "." + motion_model_name;
   std::string plugin_type;
-  motion_model_loader_ =
-    std::make_unique<pluginlib::ClassLoader<MotionModel>>(
-    "nav2_mppi_controller", "mppi::MotionModel");
+  // CriticData may still reference the previous model when it is replaced.
+  // Keep one loader alive for all motion-model instances owned by this optimizer.
+  if (!motion_model_loader_) {
+    motion_model_loader_ =
+      std::make_unique<pluginlib::ClassLoader<MotionModel>>(
+      "nav2_mppi_controller", "mppi::MotionModel");
+  }
 
   try {
     plugin_type = nav2::get_plugin_type_param(node, plugin_ns);

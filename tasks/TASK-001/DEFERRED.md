@@ -9,3 +9,5 @@
 - Measurement collector rule: numeric stdout and ROS stderr MUST be separate; force RCUTILS_LOGGING_USE_STDOUT=0 and validate every scenario before continuing. Prior mixed-stream datasets are diagnostic artifacts only, excluded from reported statistics. This is enforced in performance-profiler-run.py.
 
 ## Resolution update (historical findings above retained)
+
+2026-10-23: cppcheck fixture diagnostics and the benchmark/motion-model lifetime warnings fixed and verified in [TASK-002](../TASK-002/systematic-debugger-report.md). Both CPU/CUDA suites now 18/18 including actual cppcheck. This does not retroactively change TASK-001 results or close profiler/target/full-lifecycle gaps.

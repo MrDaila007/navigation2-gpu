@@ -183,6 +183,7 @@ TEST(UtilsTests, AnglesTests)
 TEST(UtilsTests, FurthestAndClosestReachedPoint)
 {
   models::State state;
+  state.local_path_length = 0.0f;
   models::Trajectories generated_trajectories;
   generated_trajectories.reset(100, 2);
   models::Path path;
@@ -232,6 +233,7 @@ TEST(UtilsTests, FurthestAndClosestReachedPoint)
 TEST(UtilsTests, FurthestReachedPointUturn)
 {
   models::State state;
+  state.local_path_length = 0.0f;
   models::Trajectories generated_trajectories;
   models::Path path;
   geometry_msgs::msg::Pose goal;
@@ -271,6 +273,7 @@ TEST(UtilsTests, FurthestReachedPointUturn)
 TEST(UtilsTests, findPathCosts)
 {
   models::State state;
+  state.local_path_length = 0.0f;
   models::Trajectories generated_trajectories;
   models::Path path;
   geometry_msgs::msg::Pose goal;
