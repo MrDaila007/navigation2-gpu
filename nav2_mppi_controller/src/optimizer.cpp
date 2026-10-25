@@ -58,8 +58,11 @@ void Optimizer::initialize(
     rclcpp::ParameterValue("mppi::DefaultOptimalTrajectoryValidator"));
   std::string validator_plugin_type = nav2::get_plugin_type_param(
     node, name_ + ".TrajectoryValidator");
-  validator_loader_ = std::make_unique<pluginlib::ClassLoader<OptimalTrajectoryValidator>>(
-    "nav2_mppi_controller", "mppi::OptimalTrajectoryValidator");
+  // Reuse the loader: the previous validator is still alive until replacement.
+  if (!validator_loader_) {
+    validator_loader_ = std::make_unique<pluginlib::ClassLoader<OptimalTrajectoryValidator>>(
+      "nav2_mppi_controller", "mppi::OptimalTrajectoryValidator");
+  }
   trajectory_validator_ = validator_loader_->createUniqueInstance(validator_plugin_type);
   trajectory_validator_->initialize(
     parent_, name_ + ".TrajectoryValidator",

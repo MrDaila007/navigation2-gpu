@@ -70,6 +70,68 @@ TEST(ControllerStateTransitionTest, ControllerNotFail)
   controller->cleanup();
 }
 
+class LifecycleControllerTester : public nav2_mppi_controller::MPPIController
+{
+public:
+  unsigned int batchSize() const
+  {
+    return optimizer_.getSettings().batch_size;
+  }
+};
+
+TEST(ControllerLifecycle, ReconfigureGpuPrerequisite)
+{
+  rclcpp::NodeOptions options;
+  std::vector<rclcpp::Parameter> params;
+  setUpOptimizerParams(TestOptimizerSettings{8, 8, 1, 10.0, "diff_drive", false}, {}, params);
+  params.emplace_back("dummy.regenerate_noises", true);
+  options.parameter_overrides(params);
+  auto node = getDummyNode(options, "validator_controller_node");
+  auto costmap = std::make_shared<nav2_costmap_2d::Costmap2DROS>(
+    "validator_controller_costmap", "", true);
+  ASSERT_EQ(costmap->configure().label(), "inactive");
+  auto tf_buffer = nav2::create_transform_buffer(node);
+  auto controller = std::make_unique<LifecycleControllerTester>();
+
+  testing::internal::CaptureStderr();
+  for (int cycle = 0; cycle < 3; ++cycle) {
+    EXPECT_NO_THROW(controller->configure(node, "dummy", tf_buffer, costmap));
+    EXPECT_EQ(controller->batchSize(), 8u);
+    EXPECT_NO_THROW(controller->activate());
+    EXPECT_TRUE(node->set_parameter(rclcpp::Parameter("dummy.batch_size", 9)).successful);
+    EXPECT_EQ(controller->batchSize(), 9u);
+    EXPECT_NO_THROW(controller->reset());
+    geometry_msgs::msg::PoseStamped pose;
+    pose.header.frame_id = costmap->getGlobalFrameID();
+    pose.pose.position.x = 2.0;
+    pose.pose.position.y = 2.0;
+    pose.pose.orientation.w = 1.0;
+    auto goal = pose;
+    goal.pose.position.x += 0.2;
+    nav_msgs::msg::Path path;
+    path.header = pose.header;
+    path.poses = {pose, goal};
+    geometry_msgs::msg::Twist velocity;
+    EXPECT_NO_THROW(controller->computeVelocityCommands(pose, velocity, nullptr, path, goal));
+    EXPECT_NO_THROW(controller->deactivate());
+    EXPECT_NO_THROW(controller->cleanup());
+    // cleanup destroys ParametersHandler and unregisters ROS callbacks. Its old
+    // references must not update/reset the optimizer while it is shut down.
+    EXPECT_TRUE(node->set_parameter(rclcpp::Parameter("dummy.batch_size", 8)).successful);
+    EXPECT_EQ(controller->batchSize(), 9u);
+  }
+  controller.reset();
+  // Updating the surviving node must not reach the destroyed controller either.
+  EXPECT_TRUE(node->set_parameter(rclcpp::Parameter("dummy.batch_size", 10)).successful);
+  const auto diagnostics = testing::internal::GetCapturedStderr();
+  EXPECT_EQ(diagnostics.find("Attempting to unload library"), std::string::npos) << diagnostics;
+  EXPECT_EQ(diagnostics.find("LifecycleNode is not shut down"), std::string::npos) << diagnostics;
+
+  EXPECT_EQ(costmap->cleanup().label(), "unconfigured");
+  EXPECT_EQ(costmap->shutdown().label(), "finalized");
+  EXPECT_EQ(node->shutdown().label(), "finalized");
+}
+
 int main(int argc, char ** argv)
 {
   ::testing::InitGoogleTest(&argc, argv);

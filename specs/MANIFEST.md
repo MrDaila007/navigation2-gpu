@@ -38,3 +38,7 @@
 ## R2 implementation planning
 
 - [TASK-005 implementation plan](../tasks/TASK-005/writing-plans-plan.md) and [command reference](../tasks/TASK-005/writing-plans-commands.md): b23f498a baseline, desktop RTX 3060; P0–P6 checkpoints and R2-01…10 acceptance. [PROPOSED] Implementation not started; historical TASK-002 PASS is not new R2 evidence.
+
+## R2 P0 validator lifecycle evidence
+
+- [TASK-005 P0 implementation report](../tasks/TASK-005/coder-p0-report.md): source baseline 57c8c327 + source-hashed loader reuse guard and regressions. CPU/CUDA full package checks and focused lifetime evidence are recorded there; this prerequisite does not implement or complete the R2 GPU context.

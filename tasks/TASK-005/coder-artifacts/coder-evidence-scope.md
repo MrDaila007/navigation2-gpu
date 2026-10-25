@@ -1,0 +1,3 @@
+# P0 published evidence scope
+
+[VERIFIED] Compact source hashes (red and final) and ELF build IDs are published with the report. Raw build/test logs, XML and numeric smoke output remain local under this task and in the existing container's isolated /tmp/nav2-mppi-r2-p0-57c8c327 directory. They contain intentional before-fix failures and superseded compile failures, explicitly distinguished in the report. No binaries, caches, dumps or raw diagnostic logs are added to Git. Commands allow the results to be reproduced in the documented environment; the pre-existing /ws/install dependency overlay still has incomplete source identity as documented in the profile.

@@ -101,6 +101,11 @@ public:
     return motion_model_;
   }
 
+  std::weak_ptr<OptimalTrajectoryValidator> getValidator() const
+  {
+    return trajectory_validator_;
+  }
+
   void reloadDiffDriveModel()
   {
     setMotionModel("diff_drive");
@@ -323,6 +328,85 @@ TEST(OptimizerTests, MotionModelLoaderOutlivesInstances)
 TEST(OptimizerTests, MotionModelLoaderOutlivesReplacedInstances)
 {
   expectSafeMotionModelLifetime(true);
+}
+
+// Fresh parameter handlers model the controller's cleanup/configure contract.
+// Reusing a live handler across plugin replacement is intentionally not tested:
+// its registered references belong to the previous plugin instances.
+void expectSafeValidatorReinitialization(bool fail_first, bool fail_replacement)
+{
+  auto node = std::make_shared<nav2::LifecycleNode>("validator_lifetime_node");
+  node->declare_parameter("mppic.batch_size", 8);
+  node->declare_parameter("mppic.time_steps", 8);
+  node->declare_parameter("controller_frequency", 30.0);
+  node->declare_parameter("mppic.regenerate_noises", true);
+  node->declare_parameter(
+    "mppic.diff_drive.plugin", std::string("mppi::DiffDriveMotionModel"));
+  node->declare_parameter(
+    "mppic.TrajectoryValidator.plugin",
+    std::string(fail_first ? "mppi::MissingValidator" : "mppi::DefaultOptimalTrajectoryValidator"));
+  auto costmap_ros = std::make_shared<nav2_costmap_2d::Costmap2DROS>(
+    "validator_lifetime_costmap", "", true);
+  ASSERT_EQ(costmap_ros->configure().label(), "inactive");
+  auto tf_buffer = nav2::create_transform_buffer(node);
+  std::string name = "mppic";
+  auto optimizer = std::make_unique<OptimizerTester>();
+  std::weak_ptr<OptimalTrajectoryValidator> previous;
+
+  testing::internal::CaptureStderr();
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    const bool fail = (attempt == 0 && fail_first) || (attempt == 1 && fail_replacement);
+    EXPECT_TRUE(node->set_parameter(rclcpp::Parameter(
+        "mppic.TrajectoryValidator.plugin",
+        fail ? "mppi::MissingValidator" : "mppi::DefaultOptimalTrajectoryValidator")).successful);
+    {
+      ParametersHandler handler(node, name);
+      if (fail) {
+        EXPECT_THROW(
+          optimizer->initialize(node, name, costmap_ros, tf_buffer, &handler), std::exception);
+        // A failed create must not destroy a previously usable plugin instance.
+        EXPECT_EQ(optimizer->getValidator().lock(), previous.lock());
+      } else {
+        EXPECT_NO_THROW(optimizer->initialize(node, name, costmap_ros, tf_buffer, &handler));
+        EXPECT_TRUE(previous.expired());
+        previous = optimizer->getValidator();
+        EXPECT_FALSE(previous.expired());
+        handler.start();
+        EXPECT_TRUE(node->set_parameter(rclcpp::Parameter("mppic.batch_size", 8)).successful);
+      }
+      // Stop/join any noise thread even when plugin creation threw.
+      optimizer->shutdown();
+      optimizer->shutdown();
+    }
+    // The handler is gone: a parameter change must not call reset on this optimizer.
+    EXPECT_TRUE(node->set_parameter(rclcpp::Parameter("mppic.batch_size", 9)).successful);
+    EXPECT_EQ(optimizer->getSettings().batch_size, 8u);
+    EXPECT_TRUE(node->set_parameter(rclcpp::Parameter("mppic.batch_size", 8)).successful);
+  }
+  optimizer.reset();
+  EXPECT_TRUE(previous.expired());
+  const auto diagnostics = testing::internal::GetCapturedStderr();
+  EXPECT_EQ(diagnostics.find("Attempting to unload library"), std::string::npos) << diagnostics;
+  EXPECT_EQ(diagnostics.find("LifecycleNode is not shut down"), std::string::npos) << diagnostics;
+
+  EXPECT_EQ(costmap_ros->cleanup().label(), "unconfigured");
+  EXPECT_EQ(costmap_ros->shutdown().label(), "finalized");
+  EXPECT_EQ(node->shutdown().label(), "finalized");
+}
+
+TEST(OptimizerTests, ValidatorLoaderOutlivesReinitialization)
+{
+  expectSafeValidatorReinitialization(false, false);
+}
+
+TEST(OptimizerTests, ValidatorLoaderRecoversFromInitialCreationFailure)
+{
+  expectSafeValidatorReinitialization(true, false);
+}
+
+TEST(OptimizerTests, ValidatorLoaderRecoversFromReplacementFailure)
+{
+  expectSafeValidatorReinitialization(false, true);
 }
 
 TEST(OptimizerTests, DefaultInvalidInitialSize)
